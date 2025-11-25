@@ -2,6 +2,8 @@ const { SystemSettings } = require("../../../../models/systemSettings");
 const { TokenManager } = require("../../../helpers/tiktoken");
 const tiktoken = new TokenManager();
 
+const MAX_WEB_SEARCH_CALLS = 2;
+
 const webBrowsing = {
   name: "web-browsing",
   startupConfig: {
@@ -48,11 +50,44 @@ const webBrowsing = {
           },
           handler: async function ({ query }) {
             try {
-              if (query) return await this.search(query);
-              return "There is nothing we can do. This function call returns no information.";
+              if (!query)
+                return "There is nothing we can do. This function call returns no information.";
+              if (this.hasReachedSearchLimit()) {
+                const message = `Search limit reached (maximum of ${MAX_WEB_SEARCH_CALLS} per conversation). Use previously gathered results to respond.`;
+                this.super.introspect?.(
+                  `${this.caller}: ${message} No further searches will be executed.`
+                );
+                return message;
+              }
+              this.incrementSearchCount();
+              return await this.search(query);
             } catch (error) {
               return `There was an error while calling the function. No data or response was found. Let the user know this was the error: ${error.message}`;
             }
+          },
+          normalizeArguments(args = {}) {
+            if (!args?.query || typeof args.query !== "string") return args;
+            const spaced = args.query.replace(/\s+/g, " ").trim();
+            return {
+              ...args,
+              query: spaced.toLowerCase(),
+            };
+          },
+          getSearchCountKey() {
+            return "__webBrowsingCallCount";
+          },
+          currentSearchCount() {
+            const key = this.getSearchCountKey();
+            return Number(this.super?.[key] ?? 0);
+          },
+          hasReachedSearchLimit() {
+            return this.currentSearchCount() >= MAX_WEB_SEARCH_CALLS;
+          },
+          incrementSearchCount() {
+            const key = this.getSearchCountKey();
+            const nextValue = this.currentSearchCount() + 1;
+            if (this.super) this.super[key] = nextValue;
+            return nextValue;
           },
 
           /**
