@@ -94,6 +94,33 @@ ${JSON.stringify(def.parameters.properties, null, 4)}\n`;
     return { valid: true, reason: null };
   }
 
+  /**
+   * Normalize function call arguments before dedupe/handler logic runs so
+   * plugins can opt into canonical inputs (eg: case-insensitive queries).
+   *
+   * @param {{name: string, arguments: Object}} functionCall
+   * @param {Object[]} functions
+   * @returns {{name: string, arguments: Object}}
+   */
+  normalizeFunctionCall(functionCall = {}, functions = []) {
+    const foundFunc = functions.find((def) => def.name === functionCall.name);
+    if (!foundFunc?.normalizeArguments) return functionCall;
+
+    try {
+      const normalized = foundFunc.normalizeArguments({
+        ...(functionCall.arguments || {}),
+      });
+      if (normalized && typeof normalized === "object") {
+        functionCall.arguments = normalized;
+      }
+    } catch (error) {
+      this.providerLog(
+        `Failed to normalize arguments for ${functionCall.name}: ${error.message}`
+      );
+    }
+    return functionCall;
+  }
+
   buildToolCallMessages(history = [], functions = []) {
     return [
       {
@@ -126,7 +153,7 @@ ${JSON.stringify(def.parameters.properties, null, 4)}\n`;
     const historyMessages = this.buildToolCallMessages(history, functions);
     const response = await chatCb({ messages: historyMessages });
 
-    const call = safeJsonParse(response, null);
+    let call = safeJsonParse(response, null);
     if (call === null) return { toolCall: null, text: response }; // failed to parse, so must be text.
 
     const { valid, reason } = this.validFuncCall(call, functions);
@@ -134,6 +161,8 @@ ${JSON.stringify(def.parameters.properties, null, 4)}\n`;
       this.providerLog(`Invalid function tool call: ${reason}.`);
       return { toolCall: null, text: null };
     }
+
+    call = this.normalizeFunctionCall(call, functions);
 
     if (this.deduplicator.isDuplicate(call.name, call.arguments)) {
       this.providerLog(
@@ -181,7 +210,7 @@ ${JSON.stringify(def.parameters.properties, null, 4)}\n`;
       }
     }
 
-    const call = safeJsonParse(textResponse, null);
+    let call = safeJsonParse(textResponse, null);
     if (call === null)
       return { toolCall: null, text: textResponse, uuid: msgUUID }; // failed to parse, so must be regular text response.
 
@@ -196,6 +225,8 @@ ${JSON.stringify(def.parameters.properties, null, 4)}\n`;
       });
       return { toolCall: null, text: null, uuid: msgUUID };
     }
+
+    call = this.normalizeFunctionCall(call, functions);
 
     if (this.deduplicator.isDuplicate(call.name, call.arguments)) {
       this.providerLog(
