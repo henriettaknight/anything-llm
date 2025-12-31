@@ -713,7 +713,9 @@ async function getDellProAiStudioModels(basePath = null) {
       .then((results) => results.data)
       .then((models) => {
         return models
-          .filter((model) => model.capability === "TextToText") // Only include text-to-text models for this handler
+          .filter(
+            (model) => model?.capability?.includes("TextToText") // Only include text-to-text models for this handler
+          )
           .map((model) => {
             return {
               id: model.id,
@@ -812,7 +814,7 @@ async function getCohereModels(_apiKey = null, type = "chat") {
     .then((results) => results.models)
     .then((models) =>
       models.map((model) => ({
-        id: model.id,
+        id: model.name,
         name: model.name,
       }))
     )
