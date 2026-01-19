@@ -4,6 +4,7 @@ import NewWorkspaceModal, {
   useNewWorkspaceModal,
 } from "../Modals/NewWorkspace";
 import ActiveWorkspaces from "./ActiveWorkspaces";
+import ApplicationsMenu from "./ApplicationsMenu";
 import useLogo from "@/hooks/useLogo";
 import useUser from "@/hooks/useUser";
 import Footer from "../Footer";
@@ -59,10 +60,16 @@ export default function Sidebar() {
         >
           <div className="flex flex-col h-full overflow-x-hidden">
             <div className="flex-grow flex flex-col min-w-[235px]">
-              <div className="relative h-[calc(100%-60px)] flex flex-col w-full justify-between pt-[10px] overflow-y-scroll no-scroll">
-                <div className="flex flex-col gap-y-2 pb-[60px] gap-y-[14px] overflow-y-scroll no-scroll">
-                  <SearchBox user={user} showNewWsModal={showNewWsModal} />
-                  <ActiveWorkspaces />
+              <div className="relative flex flex-col w-full pt-[10px] overflow-hidden h-full">
+                {/* Upper section - Workspaces */}
+                <div className="flex-1 flex flex-col overflow-y-scroll no-scroll">
+                  <div className="flex flex-col gap-y-2 gap-y-[14px]">
+                    <SearchBox user={user} showNewWsModal={showNewWsModal} />
+                    <div className="flex-shrink-0">
+                      <ApplicationsMenu />
+                    </div>
+                    <ActiveWorkspaces />
+                  </div>
                 </div>
               </div>
               <div className="absolute bottom-0 left-0 right-0 pt-4 pb-3 rounded-b-[16px] bg-theme-bg-sidebar bg-opacity-80 backdrop-filter backdrop-blur-md z-1">
@@ -173,6 +180,9 @@ export function SidebarMobileHeader() {
                   />
                   <ActiveWorkspaces />
                 </div>
+              </div>
+              <div className="flex flex-col gap-y-3 pb-4">
+                <ApplicationsMenu />
               </div>
               <div className="z-99 absolute bottom-0 left-0 right-0 pt-2 pb-6 rounded-br-[26px] bg-theme-bg-sidebar bg-opacity-80 backdrop-filter backdrop-blur-md">
                 <Footer />

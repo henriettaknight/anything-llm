@@ -320,6 +320,16 @@ const router = createBrowserRouter([
         path: "/onboarding/:step",
         element: <OnboardingFlow />,
       },
+      // Auto Detection
+      {
+        path: "/auto-detection",
+        lazy: async () => {
+          const { default: AutoDetection } = await import(
+            "@/pages/AutoDetection"
+          );
+          return { element: <PrivateRoute Component={AutoDetection} /> };
+        },
+      },
       // Experimental feature pages
       {
         path: "/settings/beta-features/live-document-sync/manage",
