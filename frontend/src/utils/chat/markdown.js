@@ -78,6 +78,52 @@ markdown.renderer.rules.image = function (tokens, idx) {
 
 markdown.use(markdownItKatexPlugin);
 
+const BR_SPLIT_REGEX = /<br\s*\/?>/gi;
+const BR_SKIP_TAGS = new Set(["CODE", "PRE", "KBD", "SAMP"]);
+
+function restoreLineBreaks(html = "") {
+  if (!html) return html;
+
+  try {
+    if (typeof window === "undefined" || typeof DOMParser === "undefined") {
+      return html
+        .replace(/&lt;br\s*\/?&gt;/gi, "<br />")
+        .replace(/&amp;lt;br\s*\/?&amp;gt;/gi, "<br />");
+    }
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+    textNodes.forEach((node) => {
+      const parent = node.parentElement;
+      if (!parent || BR_SKIP_TAGS.has(parent.tagName)) return;
+
+      const parts = node.textContent.split(BR_SPLIT_REGEX);
+      if (parts.length <= 1) return;
+
+      const fragment = doc.createDocumentFragment();
+      parts.forEach((part, index) => {
+        if (part) fragment.appendChild(doc.createTextNode(part));
+        if (index < parts.length - 1) {
+          const br = doc.createElement("br");
+          fragment.appendChild(br);
+        }
+      });
+
+      parent.replaceChild(fragment, node);
+    });
+
+    return doc.body.innerHTML;
+  } catch (_error) {
+    return html;
+  }
+}
+
 export default function renderMarkdown(text = "") {
-  return markdown.render(text);
+  const html = markdown.render(text);
+  return restoreLineBreaks(html);
 }

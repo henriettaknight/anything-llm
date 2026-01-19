@@ -29,13 +29,14 @@ export default defineConfig({
   },
   plugins: [
     react(),
-    visualizer({
-      template: "treemap", // or sunburst
-      open: false,
-      gzipSize: true,
-      brotliSize: true,
-      filename: "bundleinspector.html" // will be saved in project's root
-    })
+    // visualizer({
+    //   template: "treemap", // or sunburst
+    //   open: false,
+    //   gzipSize: true,
+    //   brotliSize: true,
+    //   filename: "bundleinspector.html", // will be saved in project's root
+    //   emitFile: false
+    // })
   ],
   resolve: {
     alias: [
