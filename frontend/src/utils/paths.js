@@ -229,4 +229,9 @@ export default {
       manage: () => `/settings/beta-features/live-document-sync/manage`,
     },
   },
+  autodetection: {
+    home: () => {
+      return "/auto-detection";
+    },
+  },
 };
