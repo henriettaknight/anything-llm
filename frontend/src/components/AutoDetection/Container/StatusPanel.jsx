@@ -109,7 +109,7 @@ export default function StatusPanel({ status, onStart, onStop }) {
   };
 
   return (
-    <div className="bg-theme-bg-secondary rounded-lg border border-theme-sidebar-border p-6">
+    <div className="bg-theme-bg-secondary rounded-lg border border-theme-sidebar-border p-6 flex flex-col" style={{ minHeight: '500px' }}>
       <h2 className="text-xl font-semibold text-theme-text-primary mb-6">
         {t("autodetection.status.title", "Status")}
       </h2>

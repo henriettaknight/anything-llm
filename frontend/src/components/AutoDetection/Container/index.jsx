@@ -282,9 +282,6 @@ export default function AutoDetectionContainer() {
             <h1 className="text-3xl font-bold text-theme-text-primary mb-2">
               {t("autodetection.title", "Auto Detection")}
             </h1>
-            <p className="text-theme-text-secondary">
-              {t("autodetection.description", "Configure and manage automatic code defect detection")}
-            </p>
           </div>
 
           {/* Error Message */}
@@ -296,23 +293,30 @@ export default function AutoDetectionContainer() {
           )}
 
           {/* Main Content Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Config Panel - Takes 1 column on large screens */}
-            <div className="lg:col-span-1">
-              <ConfigPanel
-                config={config}
-                onSave={saveConfig}
-                isSaving={isSaving}
-              />
+          <div className="space-y-6">
+            {/* Top Row: Config and Status */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Config Panel */}
+              <div>
+                <ConfigPanel
+                  config={config}
+                  onSave={saveConfig}
+                  isSaving={isSaving}
+                />
+              </div>
+
+              {/* Status Panel */}
+              <div>
+                <StatusPanel
+                  status={status}
+                  onStart={startDetection}
+                  onStop={stopDetection}
+                />
+              </div>
             </div>
 
-            {/* Status and Reports - Takes 2 columns on large screens */}
-            <div className="lg:col-span-2 space-y-6">
-              <StatusPanel
-                status={status}
-                onStart={startDetection}
-                onStop={stopDetection}
-              />
+            {/* Bottom Row: Reports (Full Width) */}
+            <div>
               <ReportPanel
                 reports={reports}
                 onDownload={downloadReport}

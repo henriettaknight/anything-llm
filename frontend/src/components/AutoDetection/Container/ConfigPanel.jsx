@@ -189,7 +189,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
   };
 
   return (
-    <div className="bg-theme-bg-secondary rounded-lg border border-theme-sidebar-border p-6">
+    <div className="bg-theme-bg-secondary rounded-lg border border-theme-sidebar-border p-6 flex flex-col" style={{ minHeight: '500px' }}>
       <h2 className="text-xl font-semibold text-theme-text-primary mb-6">
         {t("autodetection.config.title", "Configuration")}
       </h2>
@@ -231,7 +231,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
             <button
               onClick={handleSelectDirectory}
               disabled={isSelectingDirectory || isSaving || !browserSupport.fileSystemAPI}
-              className="px-4 py-2 bg-theme-accent-primary text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              className="px-4 py-2 bg-theme-accent-primary text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-theme-sidebar-border"
             >
               {isSelectingDirectory
                 ? t("autodetection.config.selecting", "Selecting...")
@@ -241,7 +241,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
               <button
                 onClick={handleClearDirectory}
                 disabled={isSaving}
-                className="px-3 py-2 bg-theme-bg-primary border border-theme-sidebar-border text-theme-text-secondary rounded hover:bg-theme-bg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-3 py-2 bg-theme-bg-primary text-theme-text-secondary rounded hover:bg-theme-bg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors border-2 border-theme-sidebar-border"
                 title={t("autodetection.config.clearButton", "Clear")}
               >
                 ✕

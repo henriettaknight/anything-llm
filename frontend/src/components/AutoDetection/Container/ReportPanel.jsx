@@ -153,12 +153,12 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
           ))}
         </div>
       ) : (
-        <div className="text-center py-8">
-          <div className="text-4xl mb-3 text-theme-text-secondary opacity-50">📋</div>
-          <p className="text-theme-text-secondary mb-2">
+        <div className="text-center py-3">
+          <div className="text-2xl mb-1 text-theme-text-secondary opacity-50">📋</div>
+          <p className="text-sm text-theme-text-secondary mb-1">
             {t("autodetection.reports.empty", "No reports yet")}
           </p>
-          <p className="text-sm text-theme-text-secondary">
+          <p className="text-xs text-theme-text-secondary">
             {t(
               "autodetection.reports.emptyHint",
               "Reports will appear here after detection completes"
