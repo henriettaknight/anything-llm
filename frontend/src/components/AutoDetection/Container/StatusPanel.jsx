@@ -190,7 +190,7 @@ export default function StatusPanel({ status, onStart, onStop }) {
             <button
               onClick={handleStart}
               disabled={isStarting || status.status === "error"}
-              className="flex-1 px-4 py-2 bg-theme-accent-primary text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              className="flex-1 px-4 py-2 bg-theme-accent-primary text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-theme-sidebar-border"
             >
               {isStarting
                 ? t("autodetection.status.starting", "Starting...")
@@ -200,7 +200,7 @@ export default function StatusPanel({ status, onStart, onStop }) {
             <button
               onClick={handleStop}
               disabled={isStopping}
-              className="flex-1 px-4 py-2 bg-red-600 text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              className="flex-1 px-4 py-2 bg-red-600 text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-theme-sidebar-border"
             >
               {isStopping
                 ? t("autodetection.status.stopping", "Stopping...")
@@ -212,7 +212,7 @@ export default function StatusPanel({ status, onStart, onStop }) {
             <button
               onClick={handleStart}
               disabled={isStarting}
-              className="flex-1 px-4 py-2 bg-theme-accent-primary text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              className="flex-1 px-4 py-2 bg-theme-accent-primary text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-theme-sidebar-border"
             >
               {isStarting
                 ? t("autodetection.status.retrying", "Retrying...")

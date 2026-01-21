@@ -1,16 +1,20 @@
-import { API_BASE } from "@/utils/constants";
-import { baseHeaders } from "@/utils/request";
+import configService from "@/services/autoDetection/configService";
+import detectionService from "@/services/autoDetection/detectionService";
+import reportService from "@/services/autoDetection/reportService";
 
 const AutoDetectionAPI = {
   // Get current configuration
   getConfig: async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/autodetection/config`, {
-        method: "GET",
-        headers: baseHeaders(),
-      });
-      const data = await response.json();
-      return data;
+      const config = await configService.getConfig();
+      return {
+        success: true,
+        config: {
+          directory: config.targetDirectory || "",
+          detectionTime: config.detectionTime || "",
+          enabled: config.enabled || false,
+        },
+      };
     } catch (error) {
       console.error("Error fetching config:", error);
       return { success: false, error: error.message };
@@ -20,13 +24,12 @@ const AutoDetectionAPI = {
   // Save configuration
   saveConfig: async (config) => {
     try {
-      const response = await fetch(`${API_BASE}/api/autodetection/config`, {
-        method: "POST",
-        headers: baseHeaders(),
-        body: JSON.stringify(config),
+      const result = await configService.saveConfig({
+        targetDirectory: config.directory || "",
+        detectionTime: config.detectionTime || "",
+        enabled: config.enabled || false,
       });
-      const data = await response.json();
-      return data;
+      return result;
     } catch (error) {
       console.error("Error saving config:", error);
       return { success: false, error: error.message };
@@ -36,12 +39,8 @@ const AutoDetectionAPI = {
   // Start detection
   start: async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/autodetection/start`, {
-        method: "POST",
-        headers: baseHeaders(),
-      });
-      const data = await response.json();
-      return data;
+      const result = await detectionService.start();
+      return result;
     } catch (error) {
       console.error("Error starting detection:", error);
       return { success: false, error: error.message };
@@ -51,12 +50,8 @@ const AutoDetectionAPI = {
   // Stop detection
   stop: async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/autodetection/stop`, {
-        method: "POST",
-        headers: baseHeaders(),
-      });
-      const data = await response.json();
-      return data;
+      const result = await detectionService.stop();
+      return result;
     } catch (error) {
       console.error("Error stopping detection:", error);
       return { success: false, error: error.message };
@@ -66,12 +61,8 @@ const AutoDetectionAPI = {
   // Get detection status
   getStatus: async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/autodetection/status`, {
-        method: "GET",
-        headers: baseHeaders(),
-      });
-      const data = await response.json();
-      return data;
+      const result = await detectionService.getStatus();
+      return result;
     } catch (error) {
       console.error("Error fetching status:", error);
       return { success: false, error: error.message };
@@ -81,12 +72,21 @@ const AutoDetectionAPI = {
   // Get reports list
   getReports: async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/autodetection/reports`, {
-        method: "GET",
-        headers: baseHeaders(),
-      });
-      const data = await response.json();
-      return data;
+      const result = await reportService.getReports();
+      
+      // Transform reports to match UI expectations
+      const transformedReports = result.reports.map(report => ({
+        id: report.id,
+        timestamp: report.createdAt,
+        scannedFiles: report.filesScanned,
+        defectsFound: report.defectsFound,
+        directory: report.groupPath,
+      }));
+
+      return {
+        success: true,
+        reports: transformedReports,
+      };
     } catch (error) {
       console.error("Error fetching reports:", error);
       return { success: false, error: error.message };
@@ -96,40 +96,8 @@ const AutoDetectionAPI = {
   // Download report
   downloadReport: async (reportId) => {
     try {
-      const response = await fetch(
-        `${API_BASE}/api/autodetection/report/${reportId}`,
-        {
-          method: "GET",
-          headers: baseHeaders(),
-        }
-      );
-
-      if (!response.ok) {
-        return { success: false, error: "Failed to download report" };
-      }
-
-      // Get the filename from the response headers
-      const contentDisposition = response.headers.get("content-disposition");
-      let filename = `report-${reportId}.csv`;
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-        if (filenameMatch) {
-          filename = filenameMatch[1];
-        }
-      }
-
-      // Create a blob and trigger download
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      return { success: true };
+      const result = await reportService.exportReportAsCSV(reportId);
+      return result;
     } catch (error) {
       console.error("Error downloading report:", error);
       return { success: false, error: error.message };
@@ -139,15 +107,8 @@ const AutoDetectionAPI = {
   // Delete report
   deleteReport: async (reportId) => {
     try {
-      const response = await fetch(
-        `${API_BASE}/api/autodetection/report/${reportId}`,
-        {
-          method: "DELETE",
-          headers: baseHeaders(),
-        }
-      );
-      const data = await response.json();
-      return data;
+      const result = await reportService.deleteReport(reportId);
+      return result;
     } catch (error) {
       console.error("Error deleting report:", error);
       return { success: false, error: error.message };

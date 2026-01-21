@@ -292,7 +292,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
         <button
           onClick={handleSave}
           disabled={isSaving || !browserSupport.fileSystemAPI}
-          className="w-full px-4 py-2 bg-theme-accent-primary text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+          className="w-full px-4 py-2 bg-theme-accent-primary text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-theme-sidebar-border"
         >
           {isSaving
             ? t("autodetection.config.saving", "Saving...")
