@@ -143,7 +143,7 @@ export default function StatusPanel({ status, onStart, onStop }) {
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
               <div
-                className="bg-blue-500 h-3 rounded-full transition-all duration-300"
+                className="bg-blue-600 h-3 rounded-full transition-all duration-300"
                 style={{
                   width: `${
                     status.progress.totalFiles > 0
@@ -184,7 +184,7 @@ export default function StatusPanel({ status, onStart, onStop }) {
             <button
               onClick={handleStart}
               disabled={isStarting || status.status === "error"}
-              className="flex-1 px-4 py-2 bg-theme-accent-primary text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-theme-sidebar-border"
+              className="flex-1 px-4 py-2 bg-gray-50 text-gray-800 rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-gray-200"
             >
               {isStarting
                 ? t("autodetection.status.starting", "Starting...")
@@ -194,7 +194,7 @@ export default function StatusPanel({ status, onStart, onStop }) {
             <button
               onClick={handleStop}
               disabled={isStopping}
-              className="flex-1 px-4 py-2 bg-red-600 text-white rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-theme-sidebar-border"
+              className="flex-1 px-4 py-2 bg-gray-50 text-gray-800 rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-gray-200"
             >
               {isStopping
                 ? t("autodetection.status.stopping", "Stopping...")

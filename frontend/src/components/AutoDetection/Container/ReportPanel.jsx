@@ -47,9 +47,24 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
 
   return (
     <div className="bg-theme-bg-secondary rounded-lg border border-theme-sidebar-border p-6">
-      <h2 className="text-xl font-semibold text-theme-text-primary mb-6">
-        {t("autodetection.reports.title", "Reports")}
-      </h2>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl font-semibold text-theme-text-primary">
+          {t("autodetection.reports.title", "Reports")}
+        </h2>
+        {reports && reports.length > 0 && (
+          <button
+            onClick={() => {
+              if (window.confirm(t("autodetection.reports.confirmDeleteAll", "Delete all reports?"))) {
+                reports.forEach(report => handleDelete(report.id));
+              }
+            }}
+            className="px-3 py-1 bg-gray-50 text-gray-800 text-sm rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border border-gray-200"
+            title={t("autodetection.reports.deleteAllButton", "Delete All")}
+          >
+            {t("autodetection.reports.deleteAllButton", "Delete All")}
+          </button>
+        )}
+      </div>
 
       {reports && reports.length > 0 ? (
         <div className="space-y-3">
@@ -117,7 +132,7 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
                   <button
                     onClick={() => setDeleteConfirm(report.id)}
                     disabled={isDeleting[report.id] || deleteConfirm === report.id}
-                    className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity whitespace-nowrap"
+                    className="px-3 py-1 bg-gray-50 text-gray-800 text-sm rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity whitespace-nowrap border border-gray-200"
                     title={t("autodetection.reports.deleteButton", "Delete")}
                   >
                     {isDeleting[report.id]
@@ -129,8 +144,8 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
 
               {/* Delete Confirmation */}
               {deleteConfirm === report.id && (
-                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded">
-                  <p className="text-sm text-red-800 mb-2">
+                <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded">
+                  <p className="text-sm text-gray-700 mb-2">
                     {t(
                       "autodetection.reports.deleteConfirm",
                       "Are you sure you want to delete this report?"
@@ -140,7 +155,7 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
                     <button
                       onClick={() => handleDelete(report.id)}
                       disabled={isDeleting[report.id]}
-                      className="flex-1 px-2 py-1 bg-red-600 text-white text-sm rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+                      className="flex-1 px-2 py-1 bg-gray-50 text-gray-800 text-sm rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border border-gray-200"
                     >
                       {t("autodetection.reports.confirmDelete", "Confirm Delete")}
                     </button>

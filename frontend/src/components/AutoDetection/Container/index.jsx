@@ -259,6 +259,12 @@ export default function AutoDetectionContainer() {
           progress: {
             completed: 0,
             total: 0,
+            processedFiles: 0,
+            totalFiles: 0,
+            currentGroup: 0,
+            totalGroups: 0,
+            currentGroupName: '',
+            currentFile: null
           },
           timeToDetection: null,
           error: null,
@@ -323,6 +329,16 @@ export default function AutoDetectionContainer() {
         setStatus((prev) => ({
           ...prev,
           status: "idle",
+          progress: {
+            completed: 0,
+            total: 0,
+            processedFiles: 0,
+            totalFiles: 0,
+            currentGroup: 0,
+            totalGroups: 0,
+            currentGroupName: '',
+            currentFile: null
+          },
           error: null,
         }));
         return { success: true };
