@@ -267,3 +267,15 @@ export const verifyDirectoryHandle = async (handle) => {
     return false;
   }
 };
+
+// Export all functions as default object for compatibility
+export default {
+  saveConfig,
+  loadConfig,
+  isTargetTimeReached,
+  getTimeToTarget,
+  validateConfig,
+  saveDirectoryHandle,
+  restoreDirectoryHandle,
+  verifyDirectoryHandle
+};

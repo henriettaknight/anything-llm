@@ -9,6 +9,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
     detectionTime: config?.detectionTime || "",
   });
   const [errors, setErrors] = useState({});
+  const [successMessage, setSuccessMessage] = useState("");
   const [directoryHandle, setDirectoryHandle] = useState(null);
   const [isSelectingDirectory, setIsSelectingDirectory] = useState(false);
   const [browserSupport, setBrowserSupport] = useState({
@@ -160,15 +161,30 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
 
   const handleSave = async () => {
     if (!validateForm()) {
+      console.log("Form validation failed");
       return;
     }
 
+    console.log("Form validation passed, saving...");
     const result = await onSave({
       directory: formData.directory,
       detectionTime: formData.detectionTime,
       enabled: true,
+      fileTypes: ['.h', '.cpp', '.c', '.hpp', '.cc'],
+      excludePatterns: [
+        '**/node_modules/**',
+        '**/build/**',
+        '**/dist/**',
+        '**/.git/**',
+        '**/temp/**',
+        '**/tmp/**'
+      ],
+      batchSize: 10,
+      retryAttempts: 3,
+      notificationEnabled: true,
     });
 
+    console.log("Save result:", result);
     if (!result.success) {
       setErrors({
         submit: result.error || t(
@@ -176,6 +192,13 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
           "Failed to save configuration"
         ),
       });
+      setSuccessMessage("");
+    } else {
+      // Clear errors on success
+      setErrors({});
+      setSuccessMessage(t("autodetection.config.saveSuccess", "Configuration saved successfully!"));
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccessMessage(""), 3000);
     }
   };
 
@@ -285,6 +308,13 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
         {errors.submit && (
           <div className="p-3 bg-red-50 border border-red-200 rounded text-red-800 text-sm">
             {errors.submit}
+          </div>
+        )}
+
+        {/* Success Message */}
+        {successMessage && (
+          <div className="p-3 bg-green-50 border border-green-200 rounded text-green-800 text-sm">
+            {successMessage}
           </div>
         )}
 

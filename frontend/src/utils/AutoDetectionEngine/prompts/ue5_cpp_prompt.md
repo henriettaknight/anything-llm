@@ -339,7 +339,8 @@
 - **禁止模糊描述**：每个缺陷必须有明确的代码依据和具体的触发条件
 
 ## 报告要求
-- Risk | HowToTrigger | SuggestedFix使用中文回答
+- **表格列名必须使用英文**（No, Category, File, Function/Symbol, Snippet, Lines, Risk, HowToTrigger, SuggestedFix, Confidence）
+- **Risk、HowToTrigger、SuggestedFix 的内容使用中文描述**
 - 只基于当前代码与通用知识分析，不借助任何既知缺陷ID/清单。
 - 所有缺陷必须有明确代码依据，禁止基于“可能存在”的逻辑推测（如函数参数未初始化需明确存在“使用前未赋值”的代码路径，而非单纯声明未赋值）。
 - 仅当代码片段满足“缺陷类别定义+可触发条件”时记录，例如LEAK需同时满足“资源被创建”且“所有代码路径均未释放”。

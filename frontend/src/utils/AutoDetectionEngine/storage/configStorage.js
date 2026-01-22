@@ -177,7 +177,8 @@ class ConfigStorage {
    * @returns {boolean} Validation result
    */
   static validateTimeFormat(time) {
-    const timeRegex = /^([0-1][0-9]|2[0-3]):([0-5][0-9])$/;
+    // Allow both H:MM and HH:MM formats
+    const timeRegex = /^([0-9]|[0-1][0-9]|2[0-3]):([0-5][0-9])$/;
     return timeRegex.test(time);
   }
 

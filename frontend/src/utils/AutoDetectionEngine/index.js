@@ -34,26 +34,26 @@ import { ConfigStorage, ReportStorage, fileSystemStorage } from './storage/index
  * @example
  * const engine = new AutoDetectionEngine();
  * await engine.initialize();
- * const config = await engine.config.getConfig();
+ * // Use engine.startDetection() to start detection
  */
 class AutoDetectionEngine {
   constructor() {
     // Initialize all services
-    this.config = new AutoDetectionConfigService();
-    this.detection = new CodeDetectionService();
-    this.fileMonitor = new FileMonitorService();
-    this.reports = new ReportGenerationService();
-    this.scheduler = new TaskSchedulerService();
-    this.batchProcessor = new BatchProcessingService();
-    this.resumeService = new ResumeDetectionService();
+    // Note: These are not classes, they are objects/functions exported from their modules
+    this.detection = CodeDetectionService;
+    this.fileMonitor = FileMonitorService;
+    this.reports = ReportGenerationService;
+    this.scheduler = TaskSchedulerService;
+    this.batchProcessor = BatchProcessingService;
+    this.resumeService = ResumeDetectionService;
     this.orchestrator = detectionOrchestrator;
     this.logging = loggingService;
     this.monitoring = monitoringService;
     
     this.initialized = false;
     
-    // Log engine creation
-    this.logging.info(LogCategory.SYSTEM, 'AutoDetectionEngine instance created');
+    // Note: Logging is deferred to initialize() method
+    // to avoid issues with logging service initialization
   }
 
   /**
@@ -68,15 +68,59 @@ class AutoDetectionEngine {
     }
 
     try {
-      this.logging.info(LogCategory.SYSTEM, 'Initializing AutoDetectionEngine');
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.SYSTEM, 'Initializing AutoDetectionEngine');
+      }
       
-      // Future initialization logic will be added here
-      // This may include loading configuration, checking permissions, etc.
+      // Note: AI service initialization is deferred to startDetection
+      // to avoid circular dependencies and initialization issues
       
       this.initialized = true;
-      this.logging.info(LogCategory.SYSTEM, 'AutoDetectionEngine initialized successfully');
+      
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.SYSTEM, 'AutoDetectionEngine initialized successfully');
+      }
     } catch (error) {
-      this.logging.error(LogCategory.SYSTEM, 'Failed to initialize AutoDetectionEngine', error);
+      if (this.logging && typeof this.logging.error === 'function') {
+        this.logging.error(LogCategory.SYSTEM, 'Failed to initialize AutoDetectionEngine', error);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Initialize AI service for code detection
+   * Sets up the dual mode AI adapter and initializes the code detection service
+   * 
+   * Supports both:
+   * - Direct mode: Direct connection to 172.16.100.61:8000 (development only)
+   * - LLM mode: Connection through AnythingLLM backend (production)
+   * 
+   * @private
+   * @returns {Promise<void>}
+   */
+  async initializeAIService() {
+    try {
+      // Import required modules
+      const { DualModeAIAdapter } = await import('./utils/dualModeAIAdapter.js');
+      const { initializeServices } = await import('./services/codeDetectionService.js');
+      const { getAIModeInfo } = await import('./config/aiModeConfig.js');
+
+      // Create dual mode AI adapter
+      const aiAdapter = new DualModeAIAdapter();
+
+      // Initialize code detection service with AI adapter and logging service
+      initializeServices(aiAdapter, this.logging);
+
+      // Log AI mode information
+      const modeInfo = getAIModeInfo();
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.DETECTION, 'AI service initialized successfully', modeInfo);
+      }
+    } catch (error) {
+      if (this.logging && typeof this.logging.error === 'function') {
+        this.logging.error(LogCategory.DETECTION, 'Failed to initialize AI service', error);
+      }
       throw error;
     }
   }
@@ -101,13 +145,22 @@ class AutoDetectionEngine {
     const stopTimer = this.monitoring.startTimer('detection.total_duration');
 
     try {
-      this.logging.info(LogCategory.DETECTION, 'Starting detection', { options });
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.DETECTION, 'Starting detection', { options });
+      }
       
       // Get configuration if not provided
       let config = options.config;
       if (!config) {
-        config = await this.config.getConfig();
+        // Config must be provided by caller
+        throw new Error('Configuration is required for detection');
       }
+
+      // Initialize AI service for code detection
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.DETECTION, 'Initializing AI service for code detection');
+      }
+      await this.initializeAIService();
 
       // Record detection started
       const sessionId = `session_${Date.now()}`;
@@ -131,10 +184,12 @@ class AutoDetectionEngine {
         defectsFound: 0 // Will be updated from actual results
       });
 
-      this.logging.info(LogCategory.DETECTION, 'Detection completed successfully', { 
-        sessionId: session.id,
-        duration 
-      });
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.DETECTION, 'Detection completed successfully', { 
+          sessionId: session.id,
+          duration 
+        });
+      }
 
       return {
         success: true,
@@ -142,7 +197,9 @@ class AutoDetectionEngine {
       };
     } catch (error) {
       stopTimer();
-      this.logging.error(LogCategory.DETECTION, 'Failed to start detection', error);
+      if (this.logging && typeof this.logging.error === 'function') {
+        this.logging.error(LogCategory.DETECTION, 'Failed to start detection', error);
+      }
       this.monitoring.recordDetectionFailed('unknown', error);
       
       return {
@@ -163,15 +220,21 @@ class AutoDetectionEngine {
     }
 
     try {
-      this.logging.info(LogCategory.DETECTION, 'Stopping detection');
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.DETECTION, 'Stopping detection');
+      }
       await this.orchestrator.cancelDetection();
-      this.logging.info(LogCategory.DETECTION, 'Detection stopped successfully');
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.DETECTION, 'Detection stopped successfully');
+      }
       
       return {
         success: true
       };
     } catch (error) {
-      this.logging.error(LogCategory.DETECTION, 'Failed to stop detection', error);
+      if (this.logging && typeof this.logging.error === 'function') {
+        this.logging.error(LogCategory.DETECTION, 'Failed to stop detection', error);
+      }
       return {
         success: false,
         error: error.message
@@ -190,15 +253,21 @@ class AutoDetectionEngine {
     }
 
     try {
-      this.logging.info(LogCategory.DETECTION, 'Pausing detection');
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.DETECTION, 'Pausing detection');
+      }
       await this.orchestrator.pauseDetection();
-      this.logging.info(LogCategory.DETECTION, 'Detection paused successfully');
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.DETECTION, 'Detection paused successfully');
+      }
       
       return {
         success: true
       };
     } catch (error) {
-      this.logging.error(LogCategory.DETECTION, 'Failed to pause detection', error);
+      if (this.logging && typeof this.logging.error === 'function') {
+        this.logging.error(LogCategory.DETECTION, 'Failed to pause detection', error);
+      }
       return {
         success: false,
         error: error.message
@@ -217,15 +286,21 @@ class AutoDetectionEngine {
     }
 
     try {
-      this.logging.info(LogCategory.DETECTION, 'Resuming detection');
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.DETECTION, 'Resuming detection');
+      }
       await this.orchestrator.resumeDetection();
-      this.logging.info(LogCategory.DETECTION, 'Detection resumed successfully');
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.DETECTION, 'Detection resumed successfully');
+      }
       
       return {
         success: true
       };
     } catch (error) {
-      this.logging.error(LogCategory.DETECTION, 'Failed to resume detection', error);
+      if (this.logging && typeof this.logging.error === 'function') {
+        this.logging.error(LogCategory.DETECTION, 'Failed to resume detection', error);
+      }
       return {
         success: false,
         error: error.message
@@ -467,55 +542,6 @@ class AutoDetectionEngine {
   }
 
   /**
-   * Get configuration
-   * 
-   * @returns {Promise<Object>} Current configuration
-   */
-  async getConfig() {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
-    try {
-      return await this.config.getConfig();
-    } catch (error) {
-      this.logging.error(LogCategory.CONFIG, 'Failed to get config', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Save configuration
-   * 
-   * @param {Object} config - Configuration to save
-   * @returns {Promise<Object>} Result with success status
-   */
-  async saveConfig(config) {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
-    try {
-      this.logging.info(LogCategory.CONFIG, 'Saving configuration', { config });
-      const result = await this.config.saveConfig(config);
-      
-      if (result.success) {
-        this.logging.info(LogCategory.CONFIG, 'Configuration saved successfully');
-      } else {
-        this.logging.warn(LogCategory.CONFIG, 'Failed to save configuration', { error: result.error });
-      }
-      
-      return result;
-    } catch (error) {
-      this.logging.error(LogCategory.CONFIG, 'Failed to save config', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
-  /**
    * Get logs
    * 
    * @param {Object} [filters] - Log filters
@@ -554,8 +580,12 @@ class AutoDetectionEngine {
    * Clear logs
    */
   clearLogs() {
-    this.logging.clearLogs();
-    this.logging.info(LogCategory.SYSTEM, 'Logs cleared');
+    if (this.logging && typeof this.logging.clearLogs === 'function') {
+      this.logging.clearLogs();
+    }
+    if (this.logging && typeof this.logging.info === 'function') {
+      this.logging.info(LogCategory.SYSTEM, 'Logs cleared');
+    }
   }
 
   /**
@@ -595,7 +625,9 @@ class AutoDetectionEngine {
    */
   acknowledgeAlert(alertId) {
     this.monitoring.acknowledgeAlert(alertId);
-    this.logging.info(LogCategory.SYSTEM, 'Alert acknowledged', { alertId });
+    if (this.logging && typeof this.logging.info === 'function') {
+      this.logging.info(LogCategory.SYSTEM, 'Alert acknowledged', { alertId });
+    }
   }
 
   /**
@@ -612,7 +644,9 @@ class AutoDetectionEngine {
    */
   resetMonitoring() {
     this.monitoring.reset();
-    this.logging.info(LogCategory.SYSTEM, 'Monitoring reset');
+    if (this.logging && typeof this.logging.info === 'function') {
+      this.logging.info(LogCategory.SYSTEM, 'Monitoring reset');
+    }
   }
 
   /**
@@ -621,8 +655,12 @@ class AutoDetectionEngine {
    * @param {string} level - Log level
    */
   setLogLevel(level) {
-    this.logging.setMinLevel(level);
-    this.logging.info(LogCategory.SYSTEM, 'Log level changed', { level });
+    if (this.logging && typeof this.logging.setMinLevel === 'function') {
+      this.logging.setMinLevel(level);
+    }
+    if (this.logging && typeof this.logging.info === 'function') {
+      this.logging.info(LogCategory.SYSTEM, 'Log level changed', { level });
+    }
   }
 
   /**
@@ -645,7 +683,9 @@ class AutoDetectionEngine {
     }
 
     try {
-      this.logging.info(LogCategory.SYSTEM, 'Shutting down AutoDetectionEngine');
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.SYSTEM, 'Shutting down AutoDetectionEngine');
+      }
       
       // Stop any active detection
       const session = this.orchestrator.getCurrentSession();
@@ -659,9 +699,13 @@ class AutoDetectionEngine {
       // Clean up resources
       this.initialized = false;
       
-      this.logging.info(LogCategory.SYSTEM, 'AutoDetectionEngine shutdown complete');
+      if (this.logging && typeof this.logging.info === 'function') {
+        this.logging.info(LogCategory.SYSTEM, 'AutoDetectionEngine shutdown complete');
+      }
     } catch (error) {
-      this.logging.error(LogCategory.SYSTEM, 'Error during shutdown', error);
+      if (this.logging && typeof this.logging.error === 'function') {
+        this.logging.error(LogCategory.SYSTEM, 'Error during shutdown', error);
+      }
       throw error;
     }
   }
@@ -696,5 +740,12 @@ export {
 // Export types (for JSDoc references)
 export * from './types.js';
 
-// Export a singleton instance for convenience
-export const autoDetectionEngine = new AutoDetectionEngine();
+// Export a singleton instance for convenience (lazy initialization)
+let autoDetectionEngineInstance = null;
+
+export const getAutoDetectionEngine = () => {
+  if (!autoDetectionEngineInstance) {
+    autoDetectionEngineInstance = new AutoDetectionEngine();
+  }
+  return autoDetectionEngineInstance;
+};

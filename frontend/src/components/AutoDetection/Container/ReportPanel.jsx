@@ -53,7 +53,17 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
 
       {reports && reports.length > 0 ? (
         <div className="space-y-3">
-          {reports.map((report) => (
+          {reports.map((report) => {
+            // Debug: Log report data
+            console.log('渲染报告:', {
+              id: report.id,
+              groupName: report.groupName,
+              filesScanned: report.filesScanned,
+              scannedFiles: report.scannedFiles,
+              defectsFound: report.defectsFound
+            });
+            
+            return (
             <div
               key={report.id}
               className="bg-theme-bg-primary border border-theme-sidebar-border rounded-lg p-4 hover:border-theme-accent-primary transition-colors"
@@ -61,12 +71,16 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   {/* Report Header */}
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-2 h-2 rounded-full bg-theme-accent-primary"></div>
+                  <div className="mb-2">
                     <p className="text-sm font-semibold text-theme-text-primary truncate">
-                      {t("autodetection.reports.report", "Report")} - {formatDate(report.timestamp)}
+                      {report.groupName || t("autodetection.reports.report", "Report")}
                     </p>
                   </div>
+                  
+                  {/* Report Timestamp */}
+                  <p className="text-xs text-theme-text-secondary mb-2">
+                    {formatDate(report.createdAt || report.timestamp)}
+                  </p>
 
                   {/* Report Stats */}
                   <div className="grid grid-cols-2 gap-3 mt-3">
@@ -75,7 +89,7 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
                         {t("autodetection.reports.scannedFiles", "Scanned Files")}
                       </p>
                       <p className="text-lg font-semibold text-theme-text-primary">
-                        {formatNumber(report.scannedFiles)}
+                        {formatNumber(report.filesScanned || report.scannedFiles)}
                       </p>
                     </div>
                     <div className="bg-theme-bg-secondary rounded p-2">
@@ -88,10 +102,10 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
                     </div>
                   </div>
 
-                  {/* Directory Info */}
-                  {report.directory && (
+                  {/* Group Path Info */}
+                  {(report.groupPath || report.directory) && (
                     <p className="text-xs text-theme-text-secondary mt-2 truncate">
-                      {t("autodetection.reports.directory", "Directory")}: {report.directory}
+                      {t("autodetection.reports.directory", "Directory")}: {report.groupPath || report.directory}
                     </p>
                   )}
                 </div>
@@ -150,7 +164,8 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="text-center py-3">

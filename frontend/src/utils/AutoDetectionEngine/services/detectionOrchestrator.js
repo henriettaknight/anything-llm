@@ -26,18 +26,6 @@ import { resourceMonitorService } from './resourceMonitorService.js';
  */
 
 /**
- * Session status enum
- * @enum {string}
- */
-export const SessionStatus = {
-  RUNNING: 'running',
-  PAUSED: 'paused',
-  COMPLETED: 'completed',
-  FAILED: 'failed',
-  CANCELLED: 'cancelled'
-};
-
-/**
  * Detection Orchestrator Implementation
  */
 class DetectionOrchestratorImpl {
@@ -60,13 +48,15 @@ class DetectionOrchestratorImpl {
    * @returns {Promise<DetectionSession>} - Created session
    */
   async startDetection(options) {
+    console.log('🔥 NEW CODE LOADED - startDetection called with force cleanup');
     const { directoryHandle, config, onProgress, onStatusChange, onReportGenerated, resumeFromLast = false } = options;
 
-    // Check if there's already an active session
-    const activeSession = SessionStorage.getActiveSession();
-    if (activeSession) {
-      throw new Error('检测会话已在运行中');
-    }
+    // Force cleanup any existing session state
+    this.currentSession = null;
+    this.progressCallbacks = [];
+    this.statusCallbacks = [];
+    this.reportCallbacks = [];
+    console.log('✅ Session state forcefully cleared');
 
     // Check if we should resume from last session
     if (resumeFromLast) {
@@ -181,10 +171,39 @@ class DetectionOrchestratorImpl {
         const groupResult = await this.processGroup(
           group,
           directoryHandle,
-          onReportGenerated
+          onReportGenerated,
+          this.currentSession.id  // 传递 sessionId
         );
         
         allResults.push(groupResult);
+        
+        // 立即生成并保存该分组的报告
+        if (onReportGenerated) {
+          const groupReport = {
+            groupName: group.name,
+            groupPath: group.path,
+            filesScanned: group.files.length,
+            defectsFound: 0,  // 从 groupResult 中计算
+            batches: groupResult.batches,
+            sessionId: this.currentSession.id,
+            timestamp: Date.now(),
+            createdAt: new Date().toISOString(),
+            status: 'completed'
+          };
+          
+          // 计算缺陷数
+          const batchResults = (groupResult.batches || []).flatMap(batch => batch.results || []);
+          groupReport.defectsFound = batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0);
+          groupReport.defects = batchResults.flatMap(r => r.defects || []);
+          groupReport.results = batchResults.map(r => ({
+            file: r.filePath || r.file?.path,
+            filePath: r.filePath || r.file?.path,
+            defects: r.defects || []
+          }));
+          
+          console.log(`✅ 分组 ${group.name} 检测完成，立即生成报告`);
+          onReportGenerated(groupReport);
+        }
       }
 
       // Process root files if any
@@ -202,6 +221,35 @@ class DetectionOrchestratorImpl {
       SessionStorage.updateStatus(this.currentSession.id, SessionStatus.COMPLETED);
       SessionStorage.updateProgress(this.currentSession.id, { percentage: 100 });
       
+      // Transform allResults to groups format for report generation
+      const groupResults = allResults.map(result => {
+        const batchResults = (result.batches || []).flatMap(batch => {
+          // batch.results should now contain file results with defects
+          if (!batch.results || batch.results.length === 0) {
+            console.warn(`批次 ${batch.id} 没有结果数据`);
+            return [];
+          }
+          
+          return batch.results.map(fileResult => ({
+            file: fileResult.filePath || fileResult.file?.path,
+            filePath: fileResult.filePath || fileResult.file?.path,
+            defects: fileResult.defects || []
+          }));
+        });
+        
+        console.log(`分组 ${result.groupName}: ${batchResults.length} 个文件结果`);
+        
+        return {
+          name: result.groupName,
+          path: result.groupPath,
+          results: batchResults
+        };
+      });
+      
+      // Save group results to session
+      this.currentSession.groups = groupResults;
+      SessionStorage.save(this.currentSession);
+      
       this.currentSession = SessionStorage.load(this.currentSession.id);
       this.notifyStatusChange(SessionStatus.COMPLETED);
       
@@ -212,7 +260,7 @@ class DetectionOrchestratorImpl {
       const memoryStats = resourceMonitorService.getMemoryStats();
       console.log('资源使用统计:', memoryStats);
       
-      console.log('检测完成');
+      console.log('检测完成，分组数:', groupResults.length);
       
       return this.currentSession;
 
@@ -300,19 +348,8 @@ class DetectionOrchestratorImpl {
     // Aggregate results
     const aggregated = this.batchProcessor.aggregateResults(processedBatches);
     
-    // Generate report for this group
-    if (onReportGenerated) {
-      const report = {
-        groupName: name,
-        groupPath: path,
-        filesScanned: files.length,
-        defectsFound: 0, // Will be calculated from actual defects
-        batches: processedBatches,
-        aggregated
-      };
-      
-      onReportGenerated(report);
-    }
+    // 注意：报告生成已移至 startDetection 中，在 processGroup 完成后统一处理
+    // 这样可以确保每个分组只生成一次报告
 
     return {
       groupName: name,

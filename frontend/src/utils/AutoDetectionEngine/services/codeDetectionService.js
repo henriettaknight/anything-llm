@@ -802,3 +802,7 @@ async function saveAndDownloadGroupReport(report, directoryHandle, reportGenerat
   // 3. Wait long enough to ensure download completes
   await new Promise(resolve => setTimeout(resolve, 500));
 }
+
+
+// Export default
+export default { initializeServices, detectDefectsInFile, detectDefectsInFiles, detectDefectsByGroups };

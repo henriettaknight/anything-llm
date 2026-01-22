@@ -50,7 +50,19 @@ class ReportService {
         await this.initialize();
       }
 
-      const reports = ReportStorage.list();
+      // Get report metadata from index
+      const reportMetadata = ReportStorage.list();
+      console.log('📋 reportService.getReports - 索引元数据:', reportMetadata);
+      
+      // Load full report data for each report
+      const reports = reportMetadata.map(metadata => {
+        const fullReport = ReportStorage.get(metadata.id);
+        console.log(`📄 加载完整报告 ${metadata.id}:`, fullReport);
+        // If full report exists, use it; otherwise use metadata
+        return fullReport || metadata;
+      });
+      
+      console.log('✅ reportService.getReports - 返回的报告:', reports);
       
       return {
         success: true,

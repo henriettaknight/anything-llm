@@ -28,6 +28,18 @@ const AutoDetectionAPI = {
         targetDirectory: config.directory || "",
         detectionTime: config.detectionTime || "",
         enabled: config.enabled || false,
+        fileTypes: config.fileTypes || ['.h', '.cpp', '.c', '.hpp', '.cc'],
+        excludePatterns: config.excludePatterns || [
+          '**/node_modules/**',
+          '**/build/**',
+          '**/dist/**',
+          '**/.git/**',
+          '**/temp/**',
+          '**/tmp/**'
+        ],
+        batchSize: config.batchSize || 10,
+        retryAttempts: config.retryAttempts || 3,
+        notificationEnabled: config.notificationEnabled !== false,
       });
       return result;
     } catch (error) {
@@ -45,6 +57,11 @@ const AutoDetectionAPI = {
       console.error("Error starting detection:", error);
       return { success: false, error: error.message };
     }
+  },
+
+  // Set report generated callback
+  setOnReportGenerated: (callback) => {
+    detectionService.setOnReportGenerated(callback);
   },
 
   // Stop detection
@@ -77,10 +94,14 @@ const AutoDetectionAPI = {
       // Transform reports to match UI expectations
       const transformedReports = result.reports.map(report => ({
         id: report.id,
+        groupName: report.groupName,  // ✅ 保留 groupName
         timestamp: report.createdAt,
         scannedFiles: report.filesScanned,
+        filesScanned: report.filesScanned,  // ✅ 添加 filesScanned
         defectsFound: report.defectsFound,
         directory: report.groupPath,
+        groupPath: report.groupPath,  // ✅ 添加 groupPath
+        createdAt: report.createdAt,  // ✅ 添加 createdAt
       }));
 
       return {
@@ -111,6 +132,17 @@ const AutoDetectionAPI = {
       return result;
     } catch (error) {
       console.error("Error deleting report:", error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Save report
+  saveReport: async (report) => {
+    try {
+      const result = await reportService.saveReport(report);
+      return result;
+    } catch (error) {
+      console.error("Error saving report:", error);
       return { success: false, error: error.message };
     }
   },

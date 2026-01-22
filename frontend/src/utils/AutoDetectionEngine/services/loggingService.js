@@ -378,8 +378,22 @@ class LoggingServiceImpl {
   }
 }
 
-// Export singleton instance
-export const loggingService = new LoggingServiceImpl();
+// Export singleton instance (lazy initialization)
+let loggingServiceInstance = null;
+
+export const getLoggingService = () => {
+  if (!loggingServiceInstance) {
+    loggingServiceInstance = new LoggingServiceImpl();
+  }
+  return loggingServiceInstance;
+};
+
+// For backward compatibility, create a proxy
+export const loggingService = new Proxy({}, {
+  get(target, prop) {
+    return getLoggingService()[prop];
+  }
+});
 
 // Export default
 export default loggingService;

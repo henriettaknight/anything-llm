@@ -1010,7 +1010,6 @@ const TRANSLATIONS = {
     title: "代码检测",
     description: "代码缺陷检测",
     loading: "加载中...",
-    error: "错误",
     config: {
       title: "配置",
       directory: "目标目录",
@@ -1035,6 +1034,7 @@ const TRANSLATIONS = {
         directorySelectionFailed: "选择目录失败",
         fileSystemNotSupported: "您的浏览器不支持文件系统 API",
       },
+      saveSuccess: "配置保存成功！",
       warning: {
         browserSupport: "浏览器兼容性",
         fileSystemNotSupported: "您的浏览器不支持文件系统 API。请使用 Chrome、Edge 或 Opera 86+",

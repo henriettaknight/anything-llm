@@ -3,6 +3,8 @@
  * Handles report creation, export, and management
  */
 
+import ReportStorage from '../storage/reportStorage.js';
+
 /**
  * @typedef {Object} DefectInfo
  * @property {string} type - Defect type
@@ -790,9 +792,34 @@ class ReportGenerationServiceImpl {
       // Convert to DetectionReport format
       const detectionReport = this.convertCodeDetectionReport(report);
       
-      // 1. Save to localStorage (display in history)
-      this.saveReport(detectionReport);
-      console.log(`  ✓ 已保存到历史记录`);
+      // 1. Save to localStorage using ReportStorage (display in history)
+      const reportToSave = {
+        id: detectionReport.id,
+        sessionId: report.sessionId || `session_${Date.now()}`,
+        groupName: detectionReport.groupName || report.groupName,
+        groupPath: report.groupPath || '',
+        filesScanned: detectionReport.totalFiles || report.filesScanned || 0,
+        defectsFound: detectionReport.totalDefects || report.defectsFound || 0,
+        status: 'completed',
+        createdAt: report.createdAt || new Date().toISOString(),
+        timestamp: report.timestamp || Date.now(),
+        defects: report.defects || [],
+        fileResults: detectionReport.fileResults || [],
+        summary: detectionReport.summary || { bySeverity: {}, byType: {} }
+      };
+      
+      const saved = ReportStorage.save(reportToSave);
+      if (saved) {
+        console.log(`  ✓ 已保存到历史记录 (ReportStorage)`);
+        console.log(`  📝 报告数据:`, {
+          id: reportToSave.id,
+          groupName: reportToSave.groupName,
+          filesScanned: reportToSave.filesScanned,
+          defectsFound: reportToSave.defectsFound
+        });
+      } else {
+        console.warn(`  ⚠ 保存到历史记录失败`);
+      }
       
       // 2. Download report file (using group name, CSV format)
       this.downloadReport(detectionReport, report.groupName);
@@ -1029,3 +1056,7 @@ if (typeof window !== 'undefined') {
     reportGenerationService.cleanupOldReports();
   });
 }
+
+
+// Export default
+export default reportGenerationService;

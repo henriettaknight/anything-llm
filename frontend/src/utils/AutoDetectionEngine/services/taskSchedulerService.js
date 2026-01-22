@@ -414,10 +414,24 @@ class TaskSchedulerImpl {
   }
 }
 
-// Export singleton instance
-export const taskScheduler = new TaskSchedulerImpl();
-
 // Export factory function for creating new instances (if multiple schedulers needed)
 export const createTaskScheduler = () => {
   return new TaskSchedulerImpl();
+};
+
+// Lazy singleton instance
+let taskSchedulerInstance = null;
+
+export const getTaskScheduler = () => {
+  if (!taskSchedulerInstance) {
+    taskSchedulerInstance = new TaskSchedulerImpl();
+  }
+  return taskSchedulerInstance;
+};
+
+// Export default - use lazy getter
+export default {
+  get default() {
+    return getTaskScheduler();
+  }
 };

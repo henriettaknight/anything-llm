@@ -368,3 +368,7 @@ export const resumeDetectionService = new ResumeDetectionServiceImpl();
 
 // Cleanup expired sessions on initialization
 resumeDetectionService.cleanupExpiredSessions();
+
+
+// Export default
+export default resumeDetectionService;

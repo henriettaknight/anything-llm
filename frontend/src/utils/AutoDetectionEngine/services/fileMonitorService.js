@@ -418,3 +418,7 @@ export const scanDirectoryByGroups = async (directoryHandle, config = {}) => {
   console.log(`分组扫描完成，发现 ${groups.length} 个分组，根目录文件 ${rootFiles.length} 个`);
   return { groups, rootFiles };
 };
+
+
+// Export default
+export default { scanDirectoryByGroups, filterFiles, getFileContent };

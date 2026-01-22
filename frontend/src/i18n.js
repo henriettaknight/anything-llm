@@ -16,6 +16,7 @@ i18next
     interpolation: {
       escapeValue: false,
     },
+    returnObjects: true,
   });
 
 export default i18next;

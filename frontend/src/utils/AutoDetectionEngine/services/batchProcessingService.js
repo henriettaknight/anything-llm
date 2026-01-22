@@ -200,11 +200,19 @@ class BatchProcessorImpl {
   async processBatch(batch, processor) {
     batch.status = BatchStatus.PROCESSING;
     batch.startTime = Date.now();
+    batch.results = []; // Initialize results array
 
     try {
-      // Process each file in batch sequentially
+      // Process each file in batch sequentially and collect results
       for (const file of batch.files) {
-        await processor(file);
+        const defects = await processor(file);
+        
+        // Store result for this file
+        batch.results.push({
+          file: file,
+          filePath: file.path,
+          defects: defects || []
+        });
       }
 
       batch.status = BatchStatus.COMPLETED;
@@ -227,40 +235,18 @@ class BatchProcessorImpl {
    */
   async processAllBatches(batches, processor, onProgress) {
     const processedBatches = [];
-    let activeBatches = [];
     let batchIndex = 0;
 
     for (const batch of batches) {
-      // Control concurrency count
-      while (activeBatches.length >= this.config.maxConcurrency) {
-        // Wait for one batch to complete
-        const completedBatch = await Promise.race(activeBatches);
-        processedBatches.push(completedBatch);
-        
-        // Remove completed batch from active list
-        activeBatches = activeBatches.filter(
-          p => p !== Promise.resolve(completedBatch)
-        );
-        
-        // Report progress
-        if (onProgress) {
-          onProgress(processedBatches.length, batches.length);
-        }
-      }
-
-      // Add new batch to processing queue
-      const processingPromise = this.processBatch(batch, processor);
-      activeBatches.push(processingPromise);
+      // Process batch
+      const result = await this.processBatch(batch, processor);
+      processedBatches.push(result);
       batchIndex++;
-    }
 
-    // Wait for remaining batches to complete
-    const remainingBatches = await Promise.all(activeBatches);
-    processedBatches.push(...remainingBatches);
-    
-    // Final progress report
-    if (onProgress) {
-      onProgress(processedBatches.length, batches.length);
+      // Report progress
+      if (onProgress) {
+        onProgress(batchIndex, batches.length);
+      }
     }
 
     return processedBatches;
@@ -457,4 +443,13 @@ export const batchProcessor = new BatchProcessorImpl();
 // Export factory function
 export const createBatchProcessor = (config) => {
   return new BatchProcessorImpl(config);
+};
+
+// Export default
+export default {
+  BatchStatus,
+  DEFAULT_BATCH_CONFIG,
+  batchProcessor,
+  createBatchProcessor,
+  BatchProcessorImpl
 };
