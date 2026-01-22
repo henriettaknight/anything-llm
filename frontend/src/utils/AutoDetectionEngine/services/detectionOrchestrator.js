@@ -34,6 +34,7 @@ class DetectionOrchestratorImpl {
     this.batchProcessor = null;
     this.progressCallbacks = [];
     this.statusCallbacks = [];
+    this.isCancelled = false;  // 添加取消标志
   }
 
   /**
@@ -56,6 +57,7 @@ class DetectionOrchestratorImpl {
     this.progressCallbacks = [];
     this.statusCallbacks = [];
     this.reportCallbacks = [];
+    this.isCancelled = false;  // 重置取消标志
     console.log('✅ Session state forcefully cleared');
 
     // Check if we should resume from last session
@@ -163,10 +165,28 @@ class DetectionOrchestratorImpl {
         maxConcurrency: config.maxConcurrency || 1
       });
 
+      // Calculate total groups (including root if it has files)
+      const totalGroups = groups.length + (rootFiles.length > 0 ? 1 : 0);
+
       // Process groups
       for (let i = 0; i < groups.length; i++) {
+        // 检查是否已取消
+        if (this.isCancelled) {
+          console.log('检测已被取消，停止处理');
+          throw new Error('检测已被用户取消');
+        }
+        
         const group = groups[i];
         console.log(`处理分组 ${i + 1}/${groups.length}: ${group.name}`);
+        
+        // Update progress with current group info
+        SessionStorage.updateProgress(this.currentSession.id, {
+          currentGroup: i + 1,
+          totalGroups: totalGroups,
+          currentGroupName: group.name
+        });
+        this.currentSession = SessionStorage.load(this.currentSession.id);
+        this.notifyProgress();
         
         const groupResult = await this.processGroup(
           group,
@@ -209,12 +229,51 @@ class DetectionOrchestratorImpl {
       // Process root files if any
       if (rootFiles.length > 0) {
         console.log(`处理根目录文件: ${rootFiles.length} 个`);
+        
+        // Update progress with root group info
+        SessionStorage.updateProgress(this.currentSession.id, {
+          currentGroup: totalGroups,
+          totalGroups: totalGroups,
+          currentGroupName: 'root'
+        });
+        this.currentSession = SessionStorage.load(this.currentSession.id);
+        this.notifyProgress();
+        
         const rootResult = await this.processGroup(
           { name: 'root', path: '.', files: rootFiles },
           directoryHandle,
-          onReportGenerated
+          onReportGenerated,
+          this.currentSession.id  // 传递 sessionId
         );
         allResults.push(rootResult);
+        
+        // 立即生成并保存根目录文件的报告
+        if (onReportGenerated) {
+          const groupReport = {
+            groupName: 'root',
+            groupPath: '.',
+            filesScanned: rootFiles.length,
+            defectsFound: 0,  // 从 rootResult 中计算
+            batches: rootResult.batches,
+            sessionId: this.currentSession.id,
+            timestamp: Date.now(),
+            createdAt: new Date().toISOString(),
+            status: 'completed'
+          };
+          
+          // 计算缺陷数
+          const batchResults = (rootResult.batches || []).flatMap(batch => batch.results || []);
+          groupReport.defectsFound = batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0);
+          groupReport.defects = batchResults.flatMap(r => r.defects || []);
+          groupReport.results = batchResults.map(r => ({
+            file: r.filePath || r.file?.path,
+            filePath: r.filePath || r.file?.path,
+            defects: r.defects || []
+          }));
+          
+          console.log(`✅ 根目录文件检测完成，立即生成报告`);
+          onReportGenerated(groupReport);
+        }
       }
 
       // Step 3: Complete session
@@ -270,6 +329,17 @@ class DetectionOrchestratorImpl {
       // Stop resource monitoring
       resourceMonitorService.stopMonitoring();
       
+      // 检查是否是用户取消
+      if (this.isCancelled || error.message.includes('取消')) {
+        console.log('检测被用户取消');
+        SessionStorage.updateStatus(this.currentSession.id, SessionStatus.CANCELLED, '用户取消了检测');
+        this.currentSession = SessionStorage.load(this.currentSession.id);
+        this.notifyStatusChange(SessionStatus.CANCELLED);
+        
+        // 不抛出错误，正常返回
+        return this.currentSession;
+      }
+      
       SessionStorage.updateStatus(this.currentSession.id, SessionStatus.FAILED, error.message);
       this.currentSession = SessionStorage.load(this.currentSession.id);
       this.notifyStatusChange(SessionStatus.FAILED);
@@ -302,6 +372,11 @@ class DetectionOrchestratorImpl {
     const processedBatches = await this.batchProcessor.processAllBatches(
       batches,
       async (file) => {
+        // 检查是否已取消
+        if (this.isCancelled) {
+          throw new Error('检测已被用户取消');
+        }
+        
         // Update progress
         SessionStorage.updateProgress(this.currentSession.id, {
           currentFile: file.name
@@ -404,9 +479,16 @@ class DetectionOrchestratorImpl {
       throw new Error('没有活动的检测会话');
     }
 
+    // 设置取消标志
+    this.isCancelled = true;
+    console.log('设置取消标志，检测将在下一个检查点停止');
+
     SessionStorage.updateStatus(this.currentSession.id, SessionStatus.CANCELLED);
     this.currentSession = SessionStorage.load(this.currentSession.id);
     this.notifyStatusChange(SessionStatus.CANCELLED);
+    
+    // Stop resource monitoring
+    resourceMonitorService.stopMonitoring();
     
     console.log('检测已取消');
   }
@@ -585,11 +667,39 @@ class DetectionOrchestratorImpl {
       // Process remaining root files
       if (remainingRootFiles.length > 0) {
         console.log(`处理根目录文件: ${remainingRootFiles.length} 个`);
-        await this.processGroup(
+        const rootResult = await this.processGroup(
           { name: 'root', path: '.', files: remainingRootFiles },
           options.directoryHandle,
           options.onReportGenerated
         );
+        
+        // 立即生成并保存根目录文件的报告
+        if (options.onReportGenerated) {
+          const groupReport = {
+            groupName: 'root',
+            groupPath: '.',
+            filesScanned: remainingRootFiles.length,
+            defectsFound: 0,  // 从 rootResult 中计算
+            batches: rootResult.batches,
+            sessionId: sessionId,
+            timestamp: Date.now(),
+            createdAt: new Date().toISOString(),
+            status: 'completed'
+          };
+          
+          // 计算缺陷数
+          const batchResults = (rootResult.batches || []).flatMap(batch => batch.results || []);
+          groupReport.defectsFound = batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0);
+          groupReport.defects = batchResults.flatMap(r => r.defects || []);
+          groupReport.results = batchResults.map(r => ({
+            file: r.filePath || r.file?.path,
+            filePath: r.filePath || r.file?.path,
+            defects: r.defects || []
+          }));
+          
+          console.log(`✅ 根目录文件检测完成，立即生成报告`);
+          options.onReportGenerated(groupReport);
+        }
       }
 
       // Complete session

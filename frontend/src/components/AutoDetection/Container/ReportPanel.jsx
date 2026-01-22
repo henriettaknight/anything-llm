@@ -54,15 +54,6 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
       {reports && reports.length > 0 ? (
         <div className="space-y-3">
           {reports.map((report) => {
-            // Debug: Log report data
-            console.log('渲染报告:', {
-              id: report.id,
-              groupName: report.groupName,
-              filesScanned: report.filesScanned,
-              scannedFiles: report.scannedFiles,
-              defectsFound: report.defectsFound
-            });
-            
             return (
             <div
               key={report.id}

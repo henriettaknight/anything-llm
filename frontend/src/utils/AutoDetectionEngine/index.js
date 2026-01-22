@@ -197,10 +197,21 @@ class AutoDetectionEngine {
       };
     } catch (error) {
       stopTimer();
+      
+      // 检查是否是用户取消
+      const isCancelled = error.message && error.message.includes('取消');
+      
       if (this.logging && typeof this.logging.error === 'function') {
-        this.logging.error(LogCategory.DETECTION, 'Failed to start detection', error);
+        if (isCancelled) {
+          this.logging.info(LogCategory.DETECTION, 'Detection cancelled by user');
+        } else {
+          this.logging.error(LogCategory.DETECTION, 'Failed to start detection', error);
+        }
       }
-      this.monitoring.recordDetectionFailed('unknown', error);
+      
+      if (!isCancelled) {
+        this.monitoring.recordDetectionFailed('unknown', error);
+      }
       
       return {
         success: false,

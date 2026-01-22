@@ -45,10 +45,7 @@ export default function AutoDetectionContainer() {
 
   // Generate report when detection completes (only if shouldGenerateReport flag is set)
   useEffect(() => {
-    console.log('[useEffect] status:', status.status, 'shouldGenerateReport:', status.detectionResult?.shouldGenerateReport);
-    
     if (status.status === "completed" && status.detectionResult?.shouldGenerateReport) {
-      console.log('[useEffect] Generating report...');
       // Detection just completed, create a report
       createReport();
       
@@ -122,12 +119,9 @@ export default function AutoDetectionContainer() {
 
   const loadReports = useCallback(async () => {
     try {
-      console.log('🔄 loadReports 被调用');
       const result = await AutoDetectionAPI.getReports();
-      console.log('📊 getReports 返回:', result);
       if (result.success) {
         setReports(result.reports || []);
-        console.log('✅ setReports 完成，报告数量:', result.reports?.length || 0);
       }
     } catch (error) {
       console.error("Failed to load reports:", error);
@@ -137,8 +131,6 @@ export default function AutoDetectionContainer() {
   // 处理单个分组报告生成
   const handleGroupReportGenerated = useCallback(async (groupReport) => {
     try {
-      console.log(`📝 开始处理分组报告: ${groupReport.groupName}`);
-      
       // 转换报告格式
       const reportToSave = {
         id: `report_${groupReport.timestamp}_${groupReport.groupName}`,
@@ -160,11 +152,8 @@ export default function AutoDetectionContainer() {
       const saved = ReportStorage.save(reportToSave);
       
       if (saved) {
-        console.log(`  ✅ 报告已保存: ${groupReport.groupName}`);
-        
         // 2. 立即刷新报告列表
         await loadReports();
-        console.log(`  ✅ 报告列表已刷新`);
         
         // 3. 触发下载
         const reportGenerationService = (await import('@/utils/AutoDetectionEngine/services/reportGenerationService.js')).default;
@@ -181,7 +170,6 @@ export default function AutoDetectionContainer() {
         
         const detectionReport = reportGenerationService.convertCodeDetectionReport(downloadReport);
         reportGenerationService.downloadReport(detectionReport, groupReport.groupName);
-        console.log(`  ✅ 已触发下载: ${groupReport.groupName.toLowerCase()}.csv`);
       }
     } catch (error) {
       console.error(`处理分组报告失败: ${groupReport.groupName}`, error);
@@ -295,8 +283,6 @@ export default function AutoDetectionContainer() {
 
       // 设置报告生成回调 - 每个分组检测完成后立即调用
       AutoDetectionAPI.setOnReportGenerated(async (groupReport) => {
-        console.log(`🎯 分组 ${groupReport.groupName} 检测完成，立即生成报告`);
-        
         // 立即处理该分组的报告
         await handleGroupReportGenerated(groupReport);
       });
@@ -410,13 +396,9 @@ export default function AutoDetectionContainer() {
 
   const createReport = async () => {
     try {
-      console.log('createReport called - 报告已在检测过程中实时生成');
-      
       // 报告现在是在检测过程中通过 handleGroupReportGenerated 实时生成的
       // 这里只需要确保报告列表是最新的
       await loadReports();
-      
-      console.log('✅ 报告列表已刷新');
     } catch (error) {
       console.error("Failed to refresh reports:", error);
     }

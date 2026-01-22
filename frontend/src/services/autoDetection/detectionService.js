@@ -220,6 +220,11 @@ class DetectionService {
             this.updateProgress({
               completed: progress.processedFiles || 0,
               total: progress.totalFiles || 0,
+              processedFiles: progress.processedFiles || 0,
+              totalFiles: progress.totalFiles || 0,
+              currentGroup: progress.currentGroup || 0,
+              totalGroups: progress.totalGroups || 0,
+              currentGroupName: progress.currentGroupName || '',
               currentFile: progress.currentFile || null
             });
           } else {
@@ -242,6 +247,16 @@ class DetectionService {
       console.log('Detection result:', result);
 
       if (!result.success) {
+        // 检查是否是用户取消
+        if (result.error && result.error.includes('取消')) {
+          console.log('检测被用户取消');
+          this.updateStatus({
+            status: 'idle',
+            error: null
+          });
+          return;
+        }
+        
         this.setError(result.error || 'Detection failed');
       } else {
         // Extract results from the returned session
@@ -279,7 +294,18 @@ class DetectionService {
     } catch (error) {
       console.error('Error in real detection:', error);
       console.error('Error stack:', error.stack);
-      // Fallback to simulation
+      
+      // 检查是否是用户取消
+      if (error.message && error.message.includes('取消')) {
+        console.log('检测被用户取消，不执行模拟检测');
+        this.updateStatus({
+          status: 'idle',
+          error: null
+        });
+        return;
+      }
+      
+      // 其他错误才执行模拟检测
       this.simulateDetection();
     }
   }
@@ -332,6 +358,12 @@ class DetectionService {
         };
       }
 
+      // Stop the detection engine
+      if (this.engine) {
+        console.log('Stopping detection engine...');
+        await this.engine.stopDetection();
+      }
+
       // Update session
       if (this.currentSession) {
         this.currentSession.status = 'stopped';
@@ -346,6 +378,8 @@ class DetectionService {
 
       // Clear session
       this.clearSession();
+
+      console.log('Detection stopped successfully');
 
       return {
         success: true
