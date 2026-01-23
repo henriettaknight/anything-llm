@@ -62,14 +62,14 @@ export default function AutoDetectionContainer() {
 
   // Update countdown timer every minute
   useEffect(() => {
-    if (config.enabled && config.detectionTime && status.status === "idle") {
+    if (config.detectionTime && (status.status === "idle" || status.status === "waiting")) {
       const interval = setInterval(() => {
         updateTimeToDetection();
       }, 60000); // Update every minute
       updateTimeToDetection(); // Initial update
       return () => clearInterval(interval);
     }
-  }, [config.enabled, config.detectionTime, status.status]);
+  }, [config.detectionTime, status.status]);
 
   const loadInitialData = async () => {
     try {
@@ -251,8 +251,8 @@ export default function AutoDetectionContainer() {
 
   const startDetection = async () => {
     try {
-      // Reset status if previous detection is completed
-      if (status.status === "completed") {
+      // Reset status if previous detection is completed or waiting
+      if (status.status === "completed" || status.status === "waiting") {
         setReportCreated(false); // 重置报告创建标志
         setStatus({
           status: "idle",
@@ -269,6 +269,33 @@ export default function AutoDetectionContainer() {
           timeToDetection: null,
           error: null,
         });
+      }
+
+      // 检查是否设置了检测时间
+      if (config.detectionTime) {
+        const now = new Date();
+        const [hours, minutes] = config.detectionTime.split(":").map(Number);
+        const targetTime = new Date();
+        targetTime.setHours(hours, minutes, 0, 0);
+
+        // 如果还没到检测时间，设置为等待状态
+        if (now < targetTime) {
+          const timeToWait = targetTime.getTime() - now.getTime();
+          
+          setStatus((prev) => ({
+            ...prev,
+            status: "waiting",
+            timeToDetection: timeToWait,
+            error: null,
+          }));
+          
+          // 设置定时器，到达检测时间时自动开始
+          const timer = setTimeout(() => {
+            startDetection();
+          }, timeToWait);
+          
+          return { success: true, message: `等待中，将在 ${config.detectionTime} 开始检测` };
+        }
       }
 
       // Get directory handle from config

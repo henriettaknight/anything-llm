@@ -7,9 +7,9 @@ export default function StatusPanel({ status, onStart, onStop }) {
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
 
-  // Update countdown display every minute
+  // Update countdown display every minute when waiting or idle
   useEffect(() => {
-    if (status.timeToDetection !== null && status.status === "idle") {
+    if (status.timeToDetection !== null && (status.status === "idle" || status.status === "waiting")) {
       updateCountdownDisplay();
       const interval = setInterval(updateCountdownDisplay, 60000); // Update every minute
       return () => clearInterval(interval);
@@ -60,6 +60,14 @@ export default function StatusPanel({ status, onStart, onStop }) {
           bgColor: "bg-blue-50",
           borderColor: "border-blue-200",
           dotColor: "bg-blue-600",
+        };
+      case "waiting":
+        return {
+          label: t("autodetection.status.waiting", "Waiting"),
+          color: "text-purple-600",
+          bgColor: "bg-purple-50",
+          borderColor: "border-purple-200",
+          dotColor: "bg-purple-600",
         };
       case "paused":
         return {
@@ -157,10 +165,12 @@ export default function StatusPanel({ status, onStart, onStop }) {
         )}
 
         {/* Countdown Timer */}
-        {status.status === "idle" && countdownDisplay && (
+        {(status.status === "idle" || status.status === "waiting") && countdownDisplay && (
           <div className="bg-theme-bg-primary rounded-lg p-4 border border-theme-sidebar-border">
             <p className="text-sm text-theme-text-secondary mb-2">
-              {t("autodetection.status.nextDetection", "Next Detection")}
+              {status.status === "waiting"
+                ? t("autodetection.status.waitingForDetection", "Waiting for Detection")
+                : t("autodetection.status.nextDetection", "Next Detection")}
             </p>
             <p className="text-2xl font-bold text-theme-accent-primary">
               {countdownDisplay}
@@ -180,7 +190,7 @@ export default function StatusPanel({ status, onStart, onStop }) {
 
         {/* Action Buttons */}
         <div className="flex gap-3">
-          {status.status !== "running" ? (
+          {status.status !== "running" && status.status !== "waiting" ? (
             <button
               onClick={handleStart}
               disabled={isStarting || status.status === "error"}
