@@ -3,7 +3,7 @@
  * Main entry point for the Auto Detection Engine system
  * 
  * This module provides a unified interface to all auto detection services
- * including configuration management, code detection, file monitoring,
+ * including configuration management, code review, file monitoring,
  * report generation, task scheduling, batch processing, and session recovery.
  * 
  * @module AutoDetectionEngine
@@ -89,8 +89,8 @@ class AutoDetectionEngine {
   }
 
   /**
-   * Initialize AI service for code detection
-   * Sets up the dual mode AI adapter and initializes the code detection service
+   * Initialize AI service for code review
+   * Sets up the dual mode AI adapter and initializes the code review service
    * 
    * Supports both:
    * - Direct mode: Direct connection to 172.16.100.61:8000 (development only)
@@ -109,7 +109,7 @@ class AutoDetectionEngine {
       // Create dual mode AI adapter
       const aiAdapter = new DualModeAIAdapter();
 
-      // Initialize code detection service with AI adapter and logging service
+      // Initialize code review service with AI adapter and logging service
       initializeServices(aiAdapter, this.logging);
 
       // Log AI mode information
@@ -156,9 +156,9 @@ class AutoDetectionEngine {
         throw new Error('Configuration is required for detection');
       }
 
-      // Initialize AI service for code detection
+      // Initialize AI service for code review
       if (this.logging && typeof this.logging.info === 'function') {
-        this.logging.info(LogCategory.DETECTION, 'Initializing AI service for code detection');
+        this.logging.info(LogCategory.DETECTION, 'Initializing AI service for code review');
       }
       await this.initializeAIService();
 

@@ -1,8 +1,8 @@
 /**
- * Prompt Formatter for Code Detection
+ * Prompt Formatter for Code Review
  * 
  * This module handles loading prompt templates and formatting them
- * for AI code detection requests. It also parses AI responses
+ * for AI code review requests. It also parses AI responses
  * in Markdown table format.
  */
 

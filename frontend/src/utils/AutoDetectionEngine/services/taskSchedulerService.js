@@ -279,7 +279,7 @@ class TaskSchedulerImpl {
       let detectionCompleted = false;
       
       try {
-        // Dynamically import code detection service
+        // Dynamically import code review service
         const { detectDefectsByGroups } = await import('./codeDetectionService.js');
         
         // 2. Detect by groups (each group will automatically save and download after completion)

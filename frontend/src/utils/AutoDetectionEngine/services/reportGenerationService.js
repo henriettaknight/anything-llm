@@ -887,8 +887,8 @@ class ReportGenerationServiceImpl {
   }
 
   /**
-   * Convert CodeDetectionReport to DetectionReport format
-   * @param {Object} codeReport - Code detection report
+   * Convert CodeReviewReport to DetectionReport format
+   * @param {Object} codeReport - Code review report
    * @returns {DetectionReport} - Detection report
    */
   convertCodeDetectionReport(codeReport) {

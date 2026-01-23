@@ -1,5 +1,5 @@
 /**
- * @fileoverview Code Detection Service
+ * @fileoverview Code Review Service
  * Orchestrates code analysis workflow and interfaces with AI providers
  */
 

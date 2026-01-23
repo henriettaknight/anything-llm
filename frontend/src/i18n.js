@@ -8,6 +8,7 @@ i18next
   .use(initReactI18next) // Initialize i18n for React
   .use(LanguageDetector)
   .init({
+    lng: "en", // Force English language
     fallbackLng: "en",
     debug: import.meta.env.DEV,
     defaultNS,

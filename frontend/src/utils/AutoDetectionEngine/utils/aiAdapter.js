@@ -2,7 +2,7 @@
  * AI Adapter for Auto Detection System
  * 
  * This adapter interfaces with the AnythingLLM backend AI provider system
- * to perform code detection analysis. It handles streaming responses,
+ * to perform code review analysis. It handles streaming responses,
  * provider selection, and error recovery.
  */
 
@@ -276,7 +276,7 @@ export class AIAdapter {
   }
 
   /**
-   * Format a code detection prompt
+   * Format a code review prompt
    * 
    * @param {string} fileContent - The code file content to analyze
    * @param {string} fileName - The name of the file
