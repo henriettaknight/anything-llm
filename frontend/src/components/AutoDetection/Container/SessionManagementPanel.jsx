@@ -243,7 +243,7 @@ export default function SessionManagementPanel({ onResumeSession, onDeleteSessio
                   <div className="bg-theme-bg-primary rounded p-3 border border-theme-sidebar-border">
                     <div className="flex justify-between mb-2">
                       <span className="text-theme-text-primary">
-                        {selectedSession.progress.processedFiles}/{selectedSession.progress.totalFiles} 文件
+                        {selectedSession.progress.processedFiles}/{selectedSession.progress.totalFiles} {t("autodetection.status.progressFiles", "Files")}
                       </span>
                       <span className="text-theme-accent-primary font-semibold">
                         {selectedSession.progress.percentage}%
@@ -257,7 +257,7 @@ export default function SessionManagementPanel({ onResumeSession, onDeleteSessio
                     </div>
                     {selectedSession.progress.currentFile && (
                       <p className="text-xs text-theme-text-secondary mt-2">
-                        当前文件: {selectedSession.progress.currentFile}
+                        {t("autodetection.session.currentFile", "Current File")}: {selectedSession.progress.currentFile}
                       </p>
                     )}
                   </div>
@@ -269,8 +269,8 @@ export default function SessionManagementPanel({ onResumeSession, onDeleteSessio
                       {t("autodetection.session.defectsFound", "发现缺陷")}
                     </p>
                     <p className="text-theme-text-primary">
-                      {selectedSession.progress.totalDefectsFound} 个缺陷 
-                      （{selectedSession.progress.filesWithDefects} 个文件）
+                      {selectedSession.progress.totalDefectsFound} {t("autodetection.session.defectsLabel", "defects")} 
+                      （{selectedSession.progress.filesWithDefects} {t("autodetection.session.filesLabel", "files")}）
                     </p>
                   </div>
                 )}

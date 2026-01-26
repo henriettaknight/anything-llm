@@ -174,10 +174,13 @@ export class AIAdapter {
       attachments: [],
     };
 
-    // Add system prompt if present
+    // Add system prompt if present - CRITICAL: This must be included for code detection!
     const systemMessage = messages.find((m) => m.role === "system");
     if (systemMessage) {
       payload.systemPrompt = systemMessage.content;
+      console.log('✓ System prompt included in request:', systemMessage.content.substring(0, 200) + '...');
+    } else {
+      console.warn('⚠️ No system prompt found in messages! This may cause incorrect AI responses.');
     }
 
     // Add chat history (exclude system and last user message)
@@ -192,6 +195,13 @@ export class AIAdapter {
     if (history.length > 0) {
       payload.history = history;
     }
+
+    console.log('📤 Sending request to AnythingLLM:', {
+      url,
+      messageLength: payload.message.length,
+      systemPromptLength: payload.systemPrompt?.length || 0,
+      historyLength: history.length
+    });
 
     return fetch(url, {
       method: "POST",

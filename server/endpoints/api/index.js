@@ -8,6 +8,7 @@ const { apiWorkspaceThreadEndpoints } = require("./workspaceThread");
 const { apiUserManagementEndpoints } = require("./userManagement");
 const { apiOpenAICompatibleEndpoints } = require("./openai");
 const { apiEmbedEndpoints } = require("./embed");
+const { apiPromptsEndpoints } = require("./prompts");
 
 // All endpoints must be documented and pass through the validApiKey Middleware.
 // How to JSDoc an endpoint
@@ -16,7 +17,7 @@ function developerEndpoints(app, router) {
   if (!router) return;
   useSwagger(app);
   apiAuthEndpoints(router);
-  apiAdminEndpoints(router);
+  apiAdminEndpoints(app);
   apiSystemEndpoints(router);
   apiWorkspaceEndpoints(router);
   apiDocumentEndpoints(router);
@@ -24,6 +25,7 @@ function developerEndpoints(app, router) {
   apiUserManagementEndpoints(router);
   apiOpenAICompatibleEndpoints(router);
   apiEmbedEndpoints(router);
+  apiPromptsEndpoints(router); // 修复：应该传入 router 而不是 app
 }
 
 module.exports = { developerEndpoints };

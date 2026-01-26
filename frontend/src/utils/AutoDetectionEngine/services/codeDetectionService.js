@@ -77,7 +77,7 @@ async function getUEDefectDetectionPrompt() {
     if (response.ok) {
       const prompt = await response.text();
       serverLog?.info(`✓ 成功从 API 获取提示词，长度: ${prompt.length} 字符`);
-      serverLog?.info(`✓ 提示词来源: 提示词.md 文件`);
+      serverLog?.info(`✓ 提示词来源: ue5_cpp_prompt.md 文件`);
       return prompt;
     } else {
       const errorData = await response.json().catch(() => ({}));
@@ -255,6 +255,15 @@ ${content}
       { role: 'user', content: userMessage }
     ];
 
+    console.log('\n' + '🔍'.repeat(40));
+    console.log('📋 Code Detection Request Summary:');
+    console.log('  - File:', fileInfo.path);
+    console.log('  - System prompt length:', systemPrompt.length);
+    console.log('  - User message length:', userMessage.length);
+    console.log('  - Has paired file:', !!pairedFile);
+    console.log('  - Total messages:', messageHistory.length);
+    console.log('🔍'.repeat(40) + '\n');
+
     serverLog?.info(`开始调用AI服务...`);
 
     // Add timeout mechanism (5 minutes)
@@ -294,6 +303,13 @@ ${content}
         clearTimeout(timeoutId);
       }
       
+      console.log('\n' + '📊'.repeat(40));
+      console.log('✅ AI Response Received:');
+      console.log('  - Total length:', responseContent.length, 'characters');
+      console.log('  - First 800 chars:', responseContent.substring(0, 800));
+      console.log('  - Last 300 chars:', responseContent.substring(responseContent.length - 300));
+      console.log('📊'.repeat(40) + '\n');
+      
       serverLog?.info(`AI响应内容: ${responseContent.substring(0, 500)}...`);
       serverLog?.info(`AI响应总长度: ${responseContent.length} 字符`);
     } catch (error) {
@@ -332,71 +348,232 @@ ${content}
 function parseDefectDetectionResults(response, filePath) {
   const defects = [];
   
+  console.log('\n' + '🔧'.repeat(40));
+  console.log('🔧 Starting to parse AI response:');
+  console.log('  - Response length:', response.length);
+  console.log('  - File path:', filePath);
+  
   serverLog?.debug('AI响应内容:', response.substring(0, 500)); // Debug log
   
   // Check if explicitly stated no defects
   if (response.toLowerCase().includes('no defects found') || 
       response.toLowerCase().includes('未发现缺陷') ||
       response.toLowerCase().includes('没有发现缺陷')) {
+    console.log('  ✓ AI explicitly stated: No defects found');
+    console.log('🔧'.repeat(40) + '\n');
     serverLog?.info('AI检测结果：未发现缺陷');
     return defects;
   }
   
   // Relaxed parsing logic: directly extract all possible defect information
-  // 1. First try table format
+  // 1. First try English table format
   const tableMatch = response.match(/\|.*\|.*\|.*\|.*\|.*\|.*\|.*\|.*\|.*\|.*\|/g);
+  
+  console.log('  🔍 Searching for table format...');
+  console.log('  - Table rows found:', tableMatch ? tableMatch.length : 0);
+  
   if (tableMatch && tableMatch.length > 1) {
+    console.log('  ✓ Table format detected!');
+    console.log('  - First 3 rows:');
+    for (let i = 0; i < Math.min(3, tableMatch.length); i++) {
+      console.log(`    [${i}] ${tableMatch[i]}`);
+    }
+    
+    serverLog?.info(`[DEBUG] 找到 ${tableMatch.length} 行表格数据`);
+    
+    // 输出前5行用于调试（包括表头）
+    for (let i = 0; i < Math.min(5, tableMatch.length); i++) {
+      serverLog?.info(`[DEBUG] 表格第 ${i} 行: ${tableMatch[i]}`);
+    }
+    
+    // 输出完整的 AI 响应（前 2000 字符）用于调试
+    serverLog?.info(`[DEBUG] AI 完整响应（前2000字符）:\n${response.substring(0, 2000)}`);
+    
     // Skip header, start from second row
     for (let i = 1; i < tableMatch.length; i++) {
       const row = tableMatch[i].trim();
       if (!row.startsWith('|')) continue;
       
+      // 跳过分隔符行（如 |---|---|---|）
+      if (row.includes('---')) continue;
+      
       const columns = row.split('|').map(col => col.trim()).filter(col => col);
+      
+      serverLog?.info(`[DEBUG] 第 ${i} 行解析后列数: ${columns.length}, 完整列内容: ${JSON.stringify(columns)}`);
       
       // Relaxed column count requirement: as long as there's category and description, consider it valid
       if (columns.length >= 2) {
         const validCategories = ['AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR', 'PERF', 'CLASS'];
         const category = columns[1] || 'UNKNOWN';
         
+        serverLog?.info(`[DEBUG] 检查 Category: ${category}, 是否有效: ${validCategories.includes(category)}`);
+        
         // Relaxed validation: as long as category is valid and not obviously a placeholder
         if (validCategories.includes(category) && 
             !isPlaceholderContent(columns)) {
-          defects.push({
+          const defect = {
             category: category,
             file: filePath,
-            function: columns[2] || '',
-            snippet: columns[3] || '',
-            lines: columns[4] || '',
-            risk: columns[5] || 'medium',
-            howToTrigger: columns[6] || '',
-            suggestedFix: columns[7] || '',
-            confidence: columns[8] || 'Medium'
-          });
+            function: columns[3] || '',      // 注意：这里应该是 columns[3]，因为 columns[0] 是 No
+            snippet: columns[4] || '',
+            lines: columns[5] || '',
+            risk: columns[6] || 'medium',
+            howToTrigger: columns[7] || '',
+            suggestedFix: columns[8] || '',
+            confidence: columns[9] || 'Medium'
+          };
+          
+          defects.push(defect);
+          
+          serverLog?.info(`[DEBUG] 成功解析缺陷: ${JSON.stringify(defect)}`);
         }
       }
     }
     
     if (defects.length > 0) {
-      serverLog?.info(`成功解析 ${defects.length} 个表格格式缺陷`);
+      console.log(`  ✅ Successfully parsed ${defects.length} defects from table format`);
+      console.log('  - Sample defect:', JSON.stringify(defects[0], null, 2));
+      console.log('🔧'.repeat(40) + '\n');
+      serverLog?.info(`成功解析 ${defects.length} 个英文表格格式缺陷`);
       return defects;
+    } else {
+      console.log('  ⚠️ Table found but no valid defects parsed');
     }
+  } else {
+    console.log('  ⚠️ No table format detected in response');
   }
   
-  // 2. Try list format
+  console.log('  🔍 Trying Chinese table format...');
+  // 2. Try Chinese table format as fallback (if LLM doesn't follow English requirement)
+  const chineseTableDefects = parseChineseTableFormat(response, filePath);
+  if (chineseTableDefects.length > 0) {
+    console.log(`  ✅ Successfully parsed ${chineseTableDefects.length} defects from Chinese table`);
+    console.log('🔧'.repeat(40) + '\n');
+    serverLog?.info(`成功解析 ${chineseTableDefects.length} 个中文表格格式缺陷`);
+    return chineseTableDefects;
+  }
+  
+  console.log('  🔍 Trying list format...');
+  // 3. Try list format
   const listDefects = parseListFormatDefects(response, filePath);
   if (listDefects.length > 0) {
+    console.log(`  ✅ Successfully parsed ${listDefects.length} defects from list format`);
+    console.log('🔧'.repeat(40) + '\n');
     serverLog?.info(`成功解析 ${listDefects.length} 个列表格式缺陷`);
     return listDefects;
   }
   
-  // 3. If standard format parsing fails, try relaxed text matching
+  console.log('  🔍 Trying loose format matching...');
+  // 4. If standard format parsing fails, try relaxed text matching
   const looseDefects = parseLooseFormatDefects(response, filePath);
   if (looseDefects.length > 0) {
+    console.log(`  ✅ Successfully parsed ${looseDefects.length} defects from loose format`);
+    console.log('🔧'.repeat(40) + '\n');
     serverLog?.info(`成功解析 ${looseDefects.length} 个宽松格式缺陷`);
     return looseDefects;
   }
   
+  console.log('  ❌ No defects found in any format');
+  console.log('🔧'.repeat(40) + '\n');
   serverLog?.info('未发现缺陷（AI响应格式无法解析或确实没有缺陷）');
+  return defects;
+}
+
+/**
+ * Parse Chinese table format defect detection results (fallback for when LLM doesn't follow English requirement)
+ * @param {string} response - AI response
+ * @param {string} filePath - File path
+ * @returns {DefectDetectionResult[]} - List of parsed defects
+ */
+function parseChineseTableFormat(response, filePath) {
+  const defects = [];
+  const validCategories = ['AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR', 'PERF', 'CLASS'];
+  
+  // Map Chinese category names to English
+  const chineseCategoryMap = {
+    '未初始化': 'AUTO',
+    '越界': 'ARRAY',
+    '内存释放': 'MEMF',
+    '泄漏': 'LEAK',
+    '资源': 'OSRES',
+    'STL': 'STL',
+    '废弃': 'DEPR',
+    '性能': 'PERF',
+    '类': 'CLASS'
+  };
+  
+  // Match Chinese table rows - look for patterns like | 缺陷类别 | 行号 | 说明 |
+  const tableMatch = response.match(/\|.*\|.*\|.*\|.*\|/g);
+  if (!tableMatch || tableMatch.length < 2) {
+    return defects;
+  }
+  
+  // Find header row to understand column mapping
+  let headerRow = null;
+  let headerIndex = -1;
+  for (let i = 0; i < tableMatch.length; i++) {
+    const row = tableMatch[i].toLowerCase();
+    if (row.includes('缺陷') || row.includes('category') || row.includes('no')) {
+      headerRow = tableMatch[i];
+      headerIndex = i;
+      break;
+    }
+  }
+  
+  if (headerIndex === -1) {
+    return defects;
+  }
+  
+  // Parse data rows (skip header and separator)
+  for (let i = headerIndex + 2; i < tableMatch.length; i++) {
+    const row = tableMatch[i].trim();
+    if (!row.startsWith('|') || row.includes('---')) continue;
+    
+    const columns = row.split('|').map(col => col.trim()).filter(col => col);
+    if (columns.length < 2) continue;
+    
+    // Try to extract category from various column positions
+    let category = 'UNKNOWN';
+    let categoryFound = false;
+    
+    for (const col of columns) {
+      const upperCol = col.toUpperCase();
+      // Check for English category
+      if (validCategories.includes(upperCol)) {
+        category = upperCol;
+        categoryFound = true;
+        break;
+      }
+      // Check for Chinese category
+      for (const [chinese, english] of Object.entries(chineseCategoryMap)) {
+        if (col.includes(chinese)) {
+          category = english;
+          categoryFound = true;
+          break;
+        }
+      }
+      if (categoryFound) break;
+    }
+    
+    // If no valid category found, skip this row
+    if (!categoryFound) continue;
+    
+    // Extract other fields from available columns
+    const defect = {
+      category: category,
+      file: filePath,
+      function: columns[2] || '',
+      snippet: columns[3] || '',
+      lines: columns[4] || '',
+      risk: columns[5] || 'medium',
+      howToTrigger: columns[6] || '',
+      suggestedFix: columns[7] || '',
+      confidence: columns[8] || 'Medium'
+    };
+    
+    defects.push(defect);
+  }
+  
   return defects;
 }
 

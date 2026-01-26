@@ -127,6 +127,17 @@ class ReportService {
 
       const report = ReportStorage.get(reportId);
       
+      console.log(`[DEBUG reportService.getReport] 从 localStorage 读取报告:`, {
+        reportId,
+        hasReport: !!report,
+        groupName: report?.groupName,
+        hasFileResults: !!report?.fileResults,
+        fileResultsCount: report?.fileResults?.length || 0,
+        hasDefects: !!report?.defects,
+        defectsCount: report?.defects?.length || 0,
+        sampleFileResult: report?.fileResults?.[0]
+      });
+      
       if (!report) {
         return {
           success: false,
@@ -338,8 +349,13 @@ class ReportService {
       // Convert report to CSV format
       const csv = this.convertReportToCSV(report);
       
+      // Use groupName as filename, fallback to reportId if not available
+      const fileName = report.groupName 
+        ? `${report.groupName.toLowerCase()}.csv`
+        : `report-${reportId}.csv`;
+      
       // Create download
-      this.downloadFile(csv, `report-${reportId}.csv`, 'text/csv');
+      this.downloadFile(csv, fileName, 'text/csv');
 
       return {
         success: true
@@ -479,39 +495,86 @@ class ReportService {
   }
 
   /**
-   * Convert report to CSV format
+   * Convert report to CSV format (according to 提示词.md table format)
+   * Matches snail-ai implementation exactly
    * @param {Object} report - Report data
    * @returns {string} CSV string
    */
   convertReportToCSV(report) {
-    const lines = [];
+    // CSV headers (according to 提示词.md table format)
+    const headers = [
+      'No',
+      'Category', 
+      'File',
+      'Function/Symbol',
+      'Snippet',
+      'Lines',
+      'Risk',
+      'HowToTrigger',
+      'SuggestedFix',
+      'Confidence'
+    ];
     
-    // Header
-    lines.push('# Auto Detection Report');
-    lines.push(`# Generated: ${report.createdAt}`);
-    lines.push(`# Session ID: ${report.sessionId}`);
-    lines.push(`# Group: ${report.groupName}`);
-    lines.push(`# Path: ${report.groupPath}`);
-    lines.push(`# Files Scanned: ${report.filesScanned}`);
-    lines.push(`# Defects Found: ${report.defectsFound}`);
-    lines.push('');
+    let csv = headers.join(',') + '\n';
     
-    // Defects table
-    if (report.defects && report.defects.length > 0) {
-      lines.push('File,Line,Category,Severity,Description');
-      
-      report.defects.forEach(defect => {
-        const file = this.escapeCSV(defect.file || '');
-        const line = defect.line || '';
-        const category = this.escapeCSV(defect.category || '');
-        const severity = this.escapeCSV(defect.severity || '');
-        const description = this.escapeCSV(defect.description || '');
-        
-        lines.push(`${file},${line},${category},${severity},${description}`);
+    // Collect all valid defects - ONLY use fileResults like snail-ai does
+    let defectIndex = 1;
+    if (report.fileResults && report.fileResults.length > 0) {
+      report.fileResults.forEach(fileResult => {
+        if (fileResult.hasDefects && fileResult.defects.length > 0) {
+          const validDefects = fileResult.defects.filter(defect => 
+            !this.isPlaceholderDefectInMarkdown(defect)
+          );
+          
+          validDefects.forEach(defect => {
+            const descriptionParts = defect.description.split(' - ');
+            const risk = this.escapeCSV(descriptionParts[0] || '');
+            const howToTrigger = this.escapeCSV(descriptionParts.slice(1).join(' - ') || '');
+            const functionSymbol = this.escapeCSV(defect.code ? defect.code.split('\n')[0] : '');
+            const lines = defect.line > 0 ? `L${defect.line}` : '';
+            const confidence = defect.severity === 'high' ? 'High' : defect.severity === 'low' ? 'Low' : 'Medium';
+            
+            const row = [
+              defectIndex++,
+              this.escapeCSV(defect.type || ''),
+              this.escapeCSV(fileResult.file.path),
+              functionSymbol,
+              this.escapeCSV(defect.code || ''),
+              lines,
+              risk,
+              howToTrigger,
+              this.escapeCSV(defect.recommendation || ''),
+              confidence
+            ];
+            
+            csv += row.join(',') + '\n';
+          });
+        }
       });
     }
     
-    return lines.join('\n');
+    return csv;
+  }
+
+  /**
+   * Check if defect is placeholder (matches snail-ai implementation)
+   * @param {Object} defect - Defect to check
+   * @returns {boolean} - True if placeholder
+   */
+  isPlaceholderDefectInMarkdown(defect) {
+    const placeholders = ['----------', '-------', '------', '-----------------', '--------------', '-', ''];
+    const values = [
+      defect.type, 
+      defect.description, 
+      defect.code, 
+      defect.recommendation
+    ];
+    
+    return values.some(value => 
+      placeholders.includes(value) || 
+      (typeof value === 'string' && value.includes('---')) || 
+      (typeof value === 'string' && value.trim() === '')
+    );
   }
 
   /**
@@ -539,7 +602,9 @@ class ReportService {
    * @param {string} mimeType - MIME type
    */
   downloadFile(content, filename, mimeType) {
-    const blob = new Blob([content], { type: mimeType });
+    // Add UTF-8 BOM for proper encoding in Excel
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + content], { type: `${mimeType};charset=utf-8` });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

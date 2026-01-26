@@ -16,7 +16,21 @@ export class DirectAIAdapter {
   constructor(config) {
     this.url = config.url;
     this.model = config.model;
-    this.temperature = config.temperature || 0.3;
+    this.temperature = config.temperature || 0;
+  }
+
+  /**
+   * Simple hash function for comparing strings
+   * @private
+   */
+  _simpleHash(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash.toString(16);
   }
 
   /**
@@ -28,33 +42,107 @@ export class DirectAIAdapter {
    */
   async *streamChat(messages, options = {}) {
     try {
-      const response = await fetch(`${this.url}/v1/chat/completions`, {
+      console.log('\n' + '='.repeat(80));
+      console.log('🤖 DirectAIAdapter: Starting request');
+      console.log('='.repeat(80));
+      console.log('📍 Target URL:', this.url);
+      console.log('📍 Model:', this.model);
+      console.log('📍 Temperature:', this.temperature);
+      console.log('📝 Messages count:', messages.length);
+      
+      // Log system prompt info
+      const systemMessage = messages.find(m => m.role === 'system');
+      if (systemMessage) {
+        console.log('\n✓ System prompt found:');
+        console.log('  - Length:', systemMessage.content.length, 'characters');
+        console.log('  - First 500 chars:', systemMessage.content.substring(0, 500));
+        console.log('  - Last 200 chars:', systemMessage.content.substring(systemMessage.content.length - 200));
+        console.log('  - MD5 hash:', this._simpleHash(systemMessage.content));
+      } else {
+        console.warn('⚠️ No system prompt found in messages!');
+      }
+      
+      // Log user message info
+      const userMessage = messages.find(m => m.role === 'user');
+      if (userMessage) {
+        console.log('\n✓ User message found:');
+        console.log('  - Length:', userMessage.content.length, 'characters');
+        console.log('  - First 300 chars:', userMessage.content.substring(0, 300));
+      }
+      
+      const requestBody = {
+        model: this.model,
+        messages,
+        stream: true,
+        temperature: this.temperature,
+        // max_tokens: 4000  // 移除限制，让 AI 自由输出
+      };
+      
+      console.log('\n📤 Complete Request Body:');
+      console.log('  - model:', requestBody.model);
+      console.log('  - messagesCount:', requestBody.messages.length);
+      console.log('  - stream:', requestBody.stream);
+      console.log('  - temperature:', requestBody.temperature);
+      console.log('  - max_tokens:', requestBody.max_tokens);
+      console.log('\n📋 Full messages structure:');
+      requestBody.messages.forEach((msg, idx) => {
+        console.log(`  [${idx}] role: ${msg.role}, content length: ${msg.content.length}`);
+      });
+      
+      const fullUrl = `${this.url}/v1/chat/completions`;
+      console.log('\n🌐 Sending HTTP Request:');
+      console.log('  - URL:', fullUrl);
+      console.log('  - Method: POST');
+      console.log('  - Headers:', { 'Content-Type': 'application/json' });
+      console.log('  - Body size:', JSON.stringify(requestBody).length, 'bytes');
+      
+      const requestStartTime = Date.now();
+      
+      const response = await fetch(fullUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: this.model,
-          messages,
-          stream: true,
-          temperature: this.temperature,
-          max_tokens: 4000
-        }),
+        body: JSON.stringify(requestBody),
         signal: options.signal
       });
 
+      const requestEndTime = Date.now();
+      console.log('\n📥 Response received:');
+      console.log('  - Status:', response.status, response.statusText);
+      console.log('  - Time taken:', requestEndTime - requestStartTime, 'ms');
+      console.log('  - Headers:', Object.fromEntries(response.headers.entries()));
+
       if (!response.ok) {
         const errorText = await response.text();
+        console.error('\n❌ Direct AI API error:');
+        console.error('  - Status:', response.status);
+        console.error('  - Error text:', errorText);
         throw new Error(`Direct AI API error: ${response.status} - ${errorText}`);
       }
+      
+      console.log('\n✅ Response OK, starting to stream...');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let chunkCount = 0;
+      let totalContent = '';
+      let firstChunkReceived = false;
+
+      console.log('\n📡 Starting to read stream...');
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          console.log('\n✅ Stream completed:');
+          console.log('  - Total chunks:', chunkCount);
+          console.log('  - Total content length:', totalContent.length);
+          console.log('  - First 500 chars of response:', totalContent.substring(0, 500));
+          console.log('  - Last 200 chars of response:', totalContent.substring(totalContent.length - 200));
+          console.log('='.repeat(80) + '\n');
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -64,24 +152,42 @@ export class DirectAIAdapter {
           if (!line.trim() || !line.startsWith('data: ')) continue;
 
           const data = line.slice(6);
-          if (data === '[DONE]') return;
+          if (data === '[DONE]') {
+            console.log('\n✓ Received [DONE] signal');
+            return;
+          }
 
           try {
             const parsed = JSON.parse(data);
             const content = parsed.choices?.[0]?.delta?.content || '';
             if (content) {
+              chunkCount++;
+              totalContent += content;
+              
+              if (!firstChunkReceived) {
+                console.log('\n🎯 First chunk received:');
+                console.log('  - Content:', JSON.stringify(content));
+                console.log('  - Parsed structure:', JSON.stringify(parsed, null, 2));
+                firstChunkReceived = true;
+              }
+              
+              if (chunkCount % 50 === 0) {
+                console.log(`  📊 Progress: ${chunkCount} chunks, ${totalContent.length} chars`);
+              }
+              
               yield content;
             }
           } catch (e) {
-            // Ignore JSON parse errors
-            console.debug('Failed to parse chunk:', e);
+            console.warn('⚠️ Failed to parse chunk:', e, 'Line:', line);
           }
         }
       }
     } catch (error) {
       if (error.name === 'AbortError') {
+        console.log('⚠️ Direct AI request was cancelled');
         throw new Error('Direct AI request was cancelled');
       }
+      console.error('❌ DirectAIAdapter error:', error);
       throw error;
     }
   }

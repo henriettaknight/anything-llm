@@ -49,14 +49,14 @@ export const getAIConfig = () => {
       url: import.meta.env.VITE_DIRECT_AI_URL || 'http://172.16.100.61:8000',
       model: import.meta.env.VITE_DIRECT_AI_MODEL || 'gpt-oss-20b',
       apiKey: null,
-      temperature: 0.3
+      temperature: 0  // 确定性输出，确保检测结果的一致性（与SnailAI保持一致）
     };
   } else {
     return {
       mode: 'llm',
       workspace: import.meta.env.VITE_LLM_WORKSPACE || 'auto-detection',
       apiKey: null,
-      temperature: 0.3
+      temperature: 0  // 确定性输出，确保检测结果的一致性（与SnailAI保持一致）
     };
   }
 };

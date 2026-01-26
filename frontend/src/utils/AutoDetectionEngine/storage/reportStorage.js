@@ -33,7 +33,27 @@ class ReportStorage {
 
       // Save the report
       const key = this.getReportKey(reportId);
+      console.log(`[DEBUG ReportStorage.save] 保存报告到 localStorage:`);
+      console.log(`  - key: ${key}`);
+      console.log(`  - reportId: ${reportId}`);
+      console.log(`  - hasFileResults: ${!!reportToSave.fileResults}`);
+      console.log(`  - fileResultsCount: ${reportToSave.fileResults?.length || 0}`);
+      console.log(`  - hasDefects: ${!!reportToSave.defects}`);
+      console.log(`  - defectsCount: ${reportToSave.defects?.length || 0}`);
+      console.log(`  - reportKeys: ${Object.keys(reportToSave).join(', ')}`);
+      console.log(`  - fileResults sample:`, reportToSave.fileResults?.[0]);
+      
       localStorage.setItem(key, JSON.stringify(reportToSave));
+      
+      // 验证保存是否成功
+      const savedData = localStorage.getItem(key);
+      const parsed = JSON.parse(savedData);
+      console.log(`[DEBUG ReportStorage.save] 验证保存的数据:`);
+      console.log(`  - hasFileResults: ${!!parsed.fileResults}`);
+      console.log(`  - fileResultsCount: ${parsed.fileResults?.length || 0}`);
+      console.log(`  - hasDefects: ${!!parsed.defects}`);
+      console.log(`  - defectsCount: ${parsed.defects?.length || 0}`);
+      console.log(`  - fileResults sample:`, parsed.fileResults?.[0]);
 
       // Update index
       this.addToIndex(reportId, {
@@ -68,10 +88,21 @@ class ReportStorage {
       const stored = localStorage.getItem(key);
       
       if (!stored) {
+        console.log(`[DEBUG ReportStorage.get] 报告不存在: ${reportId}`);
         return null;
       }
 
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      console.log(`[DEBUG ReportStorage.get] 读取报告:`);
+      console.log(`  - reportId: ${reportId}`);
+      console.log(`  - hasFileResults: ${!!parsed.fileResults}`);
+      console.log(`  - fileResultsCount: ${parsed.fileResults?.length || 0}`);
+      console.log(`  - hasDefects: ${!!parsed.defects}`);
+      console.log(`  - defectsCount: ${parsed.defects?.length || 0}`);
+      console.log(`  - reportKeys: ${Object.keys(parsed).join(', ')}`);
+      console.log(`  - fileResults sample:`, parsed.fileResults?.[0]);
+
+      return parsed;
     } catch (error) {
       console.error('Error retrieving report:', error);
       return null;

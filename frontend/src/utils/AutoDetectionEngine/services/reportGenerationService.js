@@ -307,6 +307,9 @@ class ReportGenerationServiceImpl {
   saveReport(report) {
     if (typeof window !== 'undefined') {
       try {
+        // Use ReportStorage for consistent storage
+        const { default: ReportStorage } = require('@/utils/AutoDetectionEngine/storage/reportStorage');
+        
         // If it's CodeDetectionReport, convert to DetectionReport format
         let finalReport;
         
@@ -318,23 +321,8 @@ class ReportGenerationServiceImpl {
           finalReport = report;
         }
         
-        // Save single report
-        localStorage.setItem(
-          `${REPORT_STORAGE_KEY_PREFIX}${finalReport.id}`,
-          JSON.stringify(finalReport)
-        );
-        
-        // Update report list
-        const reportList = this.getAllReports();
-        reportList.unshift(finalReport);
-        
-        // Keep only the latest 20 reports
-        const limitedReports = reportList.slice(0, 20);
-        
-        localStorage.setItem(
-          `${REPORT_STORAGE_KEY_PREFIX}list`,
-          JSON.stringify(limitedReports)
-        );
+        // Save using ReportStorage for consistency
+        ReportStorage.save(finalReport);
       } catch (error) {
         console.error('保存报告失败:', error);
       }
@@ -348,10 +336,8 @@ class ReportGenerationServiceImpl {
   getAllReports() {
     if (typeof window !== 'undefined') {
       try {
-        const reportListJson = localStorage.getItem(`${REPORT_STORAGE_KEY_PREFIX}list`);
-        if (reportListJson) {
-          return JSON.parse(reportListJson);
-        }
+        const { default: ReportStorage } = require('@/utils/AutoDetectionEngine/storage/reportStorage');
+        return ReportStorage.list();
       } catch (error) {
         console.error('获取报告列表失败:', error);
       }
@@ -377,10 +363,8 @@ class ReportGenerationServiceImpl {
   getReportById(reportId) {
     if (typeof window !== 'undefined') {
       try {
-        const reportJson = localStorage.getItem(`${REPORT_STORAGE_KEY_PREFIX}${reportId}`);
-        if (reportJson) {
-          return JSON.parse(reportJson);
-        }
+        const { default: ReportStorage } = require('@/utils/AutoDetectionEngine/storage/reportStorage');
+        return ReportStorage.get(reportId);
       } catch (error) {
         console.error('获取报告失败:', error);
       }
@@ -395,17 +379,8 @@ class ReportGenerationServiceImpl {
   deleteReport(reportId) {
     if (typeof window !== 'undefined') {
       try {
-        // Delete single report
-        localStorage.removeItem(`${REPORT_STORAGE_KEY_PREFIX}${reportId}`);
-        
-        // Update report list
-        const reportList = this.getAllReports();
-        const filteredReports = reportList.filter(report => report.id !== reportId);
-        
-        localStorage.setItem(
-          `${REPORT_STORAGE_KEY_PREFIX}list`,
-          JSON.stringify(filteredReports)
-        );
+        const { default: ReportStorage } = require('@/utils/AutoDetectionEngine/storage/reportStorage');
+        ReportStorage.delete(reportId);
       } catch (error) {
         console.error('删除报告失败:', error);
       }
@@ -418,23 +393,8 @@ class ReportGenerationServiceImpl {
   cleanupOldReports() {
     if (typeof window !== 'undefined') {
       try {
-        const reportList = this.getAllReports();
-        // Keep only the latest 10 reports
-        if (reportList.length > 10) {
-          const reportsToKeep = reportList.slice(0, 10);
-          const reportsToDelete = reportList.slice(10);
-          
-          // Delete old reports
-          reportsToDelete.forEach(report => {
-            localStorage.removeItem(`${REPORT_STORAGE_KEY_PREFIX}${report.id}`);
-          });
-          
-          // Update report list
-          localStorage.setItem(
-            `${REPORT_STORAGE_KEY_PREFIX}list`,
-            JSON.stringify(reportsToKeep)
-          );
-        }
+        const { default: ReportStorage } = require('@/utils/AutoDetectionEngine/storage/reportStorage');
+        ReportStorage.cleanupOldReports();
       } catch (error) {
         console.error('清理过期报告失败:', error);
       }
@@ -448,6 +408,15 @@ class ReportGenerationServiceImpl {
    * @returns {string} - CSV content
    */
   exportReportAsCSV(report, language = 'zh-CN') {
+    console.log(`[DEBUG exportReportAsCSV] 开始导出 CSV`);
+    console.log(`[DEBUG exportReportAsCSV] 报告数据:`, {
+      groupName: report.groupName,
+      hasFileResults: !!report.fileResults,
+      fileResultsCount: report.fileResults?.length || 0,
+      totalDefects: report.totalDefects,
+      sampleFileResult: report.fileResults?.[0]
+    });
+    
     // CSV headers (according to 提示词.md table format)
     const headers = [
       'No',
@@ -473,11 +442,34 @@ class ReportGenerationServiceImpl {
         );
         
         validDefects.forEach(defect => {
-          const descriptionParts = defect.description.split(' - ');
-          const risk = this.escapeCSV(this.translateText(descriptionParts[0] || '', language));
-          const howToTrigger = this.escapeCSV(this.translateText(descriptionParts.slice(1).join(' - ') || '', language));
-          const functionSymbol = this.escapeCSV(defect.code.split('\n')[0] || defect.code);
-          const lines = defect.line > 0 ? `L${defect.line}` : '';
+          // 优先使用原始字段，如果没有则从 description 中分离
+          let risk = '';
+          let howToTrigger = '';
+          
+          if (defect.risk && defect.howToTrigger) {
+            // 使用保留的原始字段
+            risk = this.escapeCSV(this.translateText(defect.risk, language));
+            howToTrigger = this.escapeCSV(this.translateText(defect.howToTrigger, language));
+          } else {
+            // 降级方案：从 description 中分离
+            const descriptionParts = defect.description.split(' - ');
+            risk = this.escapeCSV(this.translateText(descriptionParts[0] || '', language));
+            howToTrigger = this.escapeCSV(this.translateText(descriptionParts.slice(1).join(' - ') || '', language));
+          }
+          
+          // 优先使用原始的 functionSymbol，如果没有则从 code 中提取第一行
+          const functionSymbol = defect.functionSymbol 
+            ? this.escapeCSV(defect.functionSymbol)
+            : this.escapeCSV(defect.code.split('\n')[0] || defect.code);
+          
+          // 优先使用原始的 snippet，如果没有则使用 code
+          const snippet = defect.snippet 
+            ? this.escapeCSV(defect.snippet)
+            : this.escapeCSV(defect.code);
+          
+          // 优先使用原始的 lines 字符串（如 "L20–L30"），如果没有则使用单个行号
+          const lines = defect.lines || (defect.line > 0 ? `L${defect.line}` : '');
+          
           const confidence = defect.severity === 'high' ? 'High' : defect.severity === 'low' ? 'Low' : 'Medium';
           const translatedRecommendation = this.translateText(defect.recommendation, language);
           
@@ -486,7 +478,7 @@ class ReportGenerationServiceImpl {
             this.escapeCSV(this.translateText(defect.type, language)),
             this.escapeCSV(fileResult.file.path),
             functionSymbol,
-            this.escapeCSV(defect.code),
+            snippet,
             lines,
             risk,
             howToTrigger,
@@ -498,6 +490,8 @@ class ReportGenerationServiceImpl {
         });
       }
     });
+    
+    console.log(`[DEBUG exportReportAsCSV] 生成的 CSV 行数: ${csv.split('\n').length - 1}, 缺陷数: ${defectIndex - 1}`);
     
     return csv;
   }
@@ -561,8 +555,13 @@ class ReportGenerationServiceImpl {
               type: defect.type,
               severity: defect.severity,
               line: defect.line,
+              lines: defect.lines, // 保留行号范围
               code: defect.code,
+              snippet: defect.snippet, // 保留原始snippet
+              functionSymbol: defect.functionSymbol, // 保留函数符号
               description: defect.description,
+              risk: defect.risk, // 保留原始risk
+              howToTrigger: defect.howToTrigger, // 保留原始howToTrigger
               recommendation: defect.recommendation
             });
           }
@@ -649,17 +648,20 @@ class ReportGenerationServiceImpl {
    */
   isPlaceholderDefectInMarkdown(defect) {
     const placeholders = ['----------', '-------', '------', '-----------------', '--------------', '-', ''];
-    const values = [
-      defect.type, 
-      defect.description, 
-      defect.code, 
-      defect.recommendation
+    
+    // Only check critical fields that must have meaningful content
+    // Don't filter out defects just because some optional fields are empty
+    const criticalValues = [
+      defect.type,  // Must have type/category
+      defect.code   // Must have code/snippet
     ];
     
-    return values.some(value => 
+    // Check if critical fields are empty or placeholder
+    return criticalValues.some(value => 
+      !value || 
       placeholders.includes(value) || 
-      value.includes('---') || 
-      value.trim() === ''
+      (typeof value === 'string' && value.includes('---')) || 
+      (typeof value === 'string' && value.trim() === '')
     );
   }
 
@@ -698,11 +700,29 @@ class ReportGenerationServiceImpl {
       }
 
       try {
+        console.log(`[DEBUG downloadReport] 开始下载报告`);
+        console.log(`[DEBUG downloadReport] 报告数据:`, {
+          groupName: groupName || report.groupName,
+          hasFileResults: !!report.fileResults,
+          fileResultsCount: report.fileResults?.length || 0,
+          totalDefects: report.totalDefects,
+          format: format
+        });
+        
         // Use the new export method
         const exportResult = this.exportReport(report, format, { language, pretty: true });
         
-        // Create blob with proper MIME type
-        const blob = new Blob([exportResult.content], { type: exportResult.mimeType });
+        // Add UTF-8 BOM for CSV files to ensure proper encoding in Excel
+        let content = exportResult.content;
+        if (format.toLowerCase() === 'csv') {
+          // UTF-8 BOM: \uFEFF
+          content = '\uFEFF' + content;
+          console.log(`[DEBUG] CSV 内容前 100 字符:`, content.substring(0, 100));
+          console.log(`[DEBUG] CSV 内容包含中文:`, /[\u4e00-\u9fa5]/.test(content));
+        }
+        
+        // Create blob - use simple MIME type like snail-ai does
+        const blob = new Blob([content], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         
         // Prioritize groupName parameter, then use groupName in report
@@ -788,9 +808,24 @@ class ReportGenerationServiceImpl {
       const fileName = `${report.groupName.toLowerCase()}.csv`;
       
       console.log(`[${i + 1}/${reports.length}] 处理报告: ${fileName}`);
+      console.log(`[DEBUG] 原始报告数据:`, {
+        groupName: report.groupName,
+        defectsCount: report.defects?.length || 0,
+        filesScanned: report.filesScanned,
+        hasDefects: !!report.defects,
+        sampleDefect: report.defects?.[0]
+      });
       
       // Convert to DetectionReport format
       const detectionReport = this.convertCodeDetectionReport(report);
+      console.log(`[DEBUG] 转换后的 DetectionReport:`);
+      console.log(`  - groupName: ${detectionReport.groupName}`);
+      console.log(`  - totalDefects: ${detectionReport.totalDefects}`);
+      console.log(`  - fileResultsCount: ${detectionReport.fileResults?.length || 0}`);
+      console.log(`  - hasFileResults: ${!!detectionReport.fileResults}`);
+      console.log(`  - fileResults 是数组: ${Array.isArray(detectionReport.fileResults)}`);
+      console.log(`  - fileResults[0]:`, detectionReport.fileResults?.[0]);
+      console.log(`  - fileResults 完整:`, JSON.stringify(detectionReport.fileResults, null, 2));
       
       // 1. Save to localStorage using ReportStorage (display in history)
       const reportToSave = {
@@ -808,6 +843,12 @@ class ReportGenerationServiceImpl {
         summary: detectionReport.summary || { bySeverity: {}, byType: {} }
       };
       
+      console.log(`[DEBUG saveGroupReports] reportToSave 准备保存:`);
+      console.log(`  - fileResults 长度: ${reportToSave.fileResults?.length || 0}`);
+      console.log(`  - fileResults 是否为数组: ${Array.isArray(reportToSave.fileResults)}`);
+      console.log(`  - fileResults 第一项:`, reportToSave.fileResults?.[0]);
+      console.log(`  - defects 长度: ${reportToSave.defects?.length || 0}`);
+      
       const saved = ReportStorage.save(reportToSave);
       if (saved) {
         console.log(`  ✓ 已保存到历史记录 (ReportStorage)`);
@@ -815,8 +856,13 @@ class ReportGenerationServiceImpl {
           id: reportToSave.id,
           groupName: reportToSave.groupName,
           filesScanned: reportToSave.filesScanned,
-          defectsFound: reportToSave.defectsFound
+          defectsFound: reportToSave.defectsFound,
+          hasFileResults: !!reportToSave.fileResults,
+          fileResultsCount: reportToSave.fileResults?.length || 0,
+          hasDefects: !!reportToSave.defects,
+          defectsCount: reportToSave.defects?.length || 0
         });
+        console.log(`[DEBUG] 保存到 localStorage 的完整数据:`, JSON.stringify(reportToSave, null, 2));
       } else {
         console.warn(`  ⚠ 保存到历史记录失败`);
       }
@@ -912,7 +958,10 @@ class ReportGenerationServiceImpl {
       
       // Improved line number extraction logic
       let lineNumber = 0;
+      let linesRange = ''; // 保留原始的行号范围字符串
+      
       if (defect.lines && defect.lines.trim()) {
+        linesRange = defect.lines.trim(); // 保留原始格式，如 "L20–L30"
         const lineMatch = defect.lines.match(/L?(\d+)/);
         if (lineMatch) {
           lineNumber = parseInt(lineMatch[1]);
@@ -924,17 +973,24 @@ class ReportGenerationServiceImpl {
         const descLineMatch = defect.howToTrigger.match(/L(\d+)/);
         if (descLineMatch) {
           lineNumber = parseInt(descLineMatch[1]);
+          linesRange = `L${lineNumber}`; // 如果从描述中提取，也保存为字符串格式
         }
       }
       
       // According to 提示词.md required format, correctly separate each field
       fileDefects.push({
         type: defect.category,
-        description: `${defect.risk} - ${defect.howToTrigger}`, // Maintain compatibility
+        description: `${defect.risk} - ${defect.howToTrigger}`, // Maintain compatibility (for display)
         line: lineNumber,
+        lines: linesRange, // 保留原始行号范围字符串
         code: defect.snippet,
         severity: this.mapConfidenceToSeverity(defect.confidence),
-        recommendation: defect.suggestedFix
+        recommendation: defect.suggestedFix,
+        // 保留原始字段，用于CSV导出
+        risk: defect.risk,
+        howToTrigger: defect.howToTrigger,
+        functionSymbol: defect.function,
+        snippet: defect.snippet
       });
     });
     
@@ -982,18 +1038,20 @@ class ReportGenerationServiceImpl {
    */
   isPlaceholderDefect(defect) {
     const placeholders = ['----------', '-------', '------', '-----------------', '--------------', '-', ''];
-    const values = [
-      defect.category, 
-      defect.risk, 
-      defect.howToTrigger, 
-      defect.snippet, 
-      defect.suggestedFix
+    
+    // Only check critical fields that must have meaningful content
+    // Don't filter out defects just because some optional fields are empty
+    const criticalValues = [
+      defect.category,  // Must have category
+      defect.file       // Must have file
     ];
     
-    return values.some(value => 
+    // Check if critical fields are empty or placeholder
+    return criticalValues.some(value => 
+      !value || 
       placeholders.includes(value) || 
-      value.includes('---') || 
-      value.trim() === ''
+      (typeof value === 'string' && value.includes('---')) || 
+      (typeof value === 'string' && value.trim() === '')
     );
   }
   

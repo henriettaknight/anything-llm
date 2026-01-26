@@ -117,8 +117,28 @@ const AutoDetectionAPI = {
   // Download report
   downloadReport: async (reportId) => {
     try {
-      const result = await reportService.exportReportAsCSV(reportId);
-      return result;
+      console.log(`[DEBUG AutoDetectionAPI.downloadReport] 开始手动下载报告: ${reportId}`);
+      
+      // Get report from storage
+      const report = await reportService.getReport(reportId);
+      if (!report.success || !report.report) {
+        return { success: false, error: 'Report not found' };
+      }
+      
+      console.log(`[DEBUG AutoDetectionAPI.downloadReport] 获取到的报告:`, {
+        reportId,
+        groupName: report.report.groupName,
+        hasFileResults: !!report.report.fileResults,
+        fileResultsCount: report.report.fileResults?.length || 0,
+        hasDefects: !!report.report.defects,
+        defectsCount: report.report.defects?.length || 0
+      });
+      
+      // Use reportGenerationService to download (same as auto-download)
+      const { reportGenerationService } = await import('@/utils/AutoDetectionEngine/services/reportGenerationService.js');
+      await reportGenerationService.downloadReport(report.report, report.report.groupName);
+      
+      return { success: true };
     } catch (error) {
       console.error("Error downloading report:", error);
       return { success: false, error: error.message };

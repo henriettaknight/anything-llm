@@ -131,20 +131,36 @@ export default function AutoDetectionContainer() {
   // 处理单个分组报告生成
   const handleGroupReportGenerated = useCallback(async (groupReport) => {
     try {
-      // 转换报告格式
-      const reportToSave = {
+      // 先转换报告格式，从 defects 生成 fileResults
+      const reportGenerationService = (await import('@/utils/AutoDetectionEngine/services/reportGenerationService.js')).default;
+      
+      // 构造用于转换的报告对象
+      const reportForConversion = {
         id: `report_${groupReport.timestamp}_${groupReport.groupName}`,
-        sessionId: groupReport.sessionId,
         groupName: groupReport.groupName,
-        groupPath: groupReport.groupPath,
         filesScanned: groupReport.filesScanned,
         defectsFound: groupReport.defectsFound,
+        defects: groupReport.defects || [],
+        timestamp: groupReport.timestamp
+      };
+      
+      // 转换为 DetectionReport 格式（包含 fileResults）
+      const detectionReport = reportGenerationService.convertCodeDetectionReport(reportForConversion);
+      
+      // 准备保存的报告（使用转换后的 fileResults）
+      const reportToSave = {
+        id: detectionReport.id,
+        sessionId: groupReport.sessionId,
+        groupName: detectionReport.groupName,
+        groupPath: groupReport.groupPath,
+        filesScanned: detectionReport.totalFiles,
+        defectsFound: detectionReport.totalDefects,
         status: 'completed',
         createdAt: groupReport.createdAt,
         timestamp: groupReport.timestamp,
         defects: groupReport.defects || [],
-        fileResults: groupReport.fileResults || [],
-        summary: { bySeverity: {}, byType: {} }
+        fileResults: detectionReport.fileResults || [],  // ← 使用转换后的 fileResults
+        summary: detectionReport.summary || { bySeverity: {}, byType: {} }
       };
       
       // 1. 保存到 localStorage
@@ -155,20 +171,7 @@ export default function AutoDetectionContainer() {
         // 2. 立即刷新报告列表
         await loadReports();
         
-        // 3. 触发下载
-        const reportGenerationService = (await import('@/utils/AutoDetectionEngine/services/reportGenerationService.js')).default;
-        
-        // 构造用于下载的报告对象
-        const downloadReport = {
-          id: reportToSave.id,
-          groupName: groupReport.groupName,
-          filesScanned: groupReport.filesScanned,
-          defectsFound: groupReport.defectsFound,
-          defects: groupReport.defects || [],
-          timestamp: groupReport.timestamp
-        };
-        
-        const detectionReport = reportGenerationService.convertCodeDetectionReport(downloadReport);
+        // 3. 触发下载（使用已经转换好的 detectionReport）
         reportGenerationService.downloadReport(detectionReport, groupReport.groupName);
       }
     } catch (error) {
