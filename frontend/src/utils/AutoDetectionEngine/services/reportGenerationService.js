@@ -1,9 +1,12 @@
 /**
  * @fileoverview Report Generation Service
- * Handles report creation, export, and management
+ * Handles report creation, export, and management with i18n support
  */
 
 import ReportStorage from '../storage/reportStorage.js';
+import { createTranslationService } from './translationService.js';
+import { detectUserLanguage, needsTranslation } from '../utils/languageDetector.js';
+import { enhancedTranslate, containsChinese, validateTranslation } from './translationEnhancer.js';
 
 /**
  * @typedef {Object} DefectInfo
@@ -45,6 +48,11 @@ const REPORT_STORAGE_KEY_PREFIX = 'detection_report_';
  * Report Generation Service Implementation
  */
 class ReportGenerationServiceImpl {
+  constructor() {
+    // Initialize translation service
+    this.translationService = createTranslationService(true);
+    console.log('✅ ReportGenerationService initialized with translation support');
+  }
   /**
    * Generate comprehensive report from detection results
    * @param {Object} options - Report generation options
@@ -404,11 +412,11 @@ class ReportGenerationServiceImpl {
   /**
    * Export report as CSV
    * @param {DetectionReport} report - Report to export
-   * @param {string} [language='zh-CN'] - Target language
-   * @returns {string} - CSV content
+   * @param {string} [targetLang='zh'] - Target language
+   * @returns {Promise<string>} - CSV content
    */
-  exportReportAsCSV(report, language = 'zh-CN') {
-    console.log(`[DEBUG exportReportAsCSV] 开始导出 CSV`);
+  async exportReportAsCSV(report, targetLang = 'zh') {
+    console.log(`[DEBUG exportReportAsCSV] 开始导出 CSV, 目标语言: ${targetLang}`);
     console.log(`[DEBUG exportReportAsCSV] 报告数据:`, {
       groupName: report.groupName,
       hasFileResults: !!report.fileResults,
@@ -435,26 +443,26 @@ class ReportGenerationServiceImpl {
     
     // Collect all valid defects
     let defectIndex = 1;
-    report.fileResults.forEach(fileResult => {
+    for (const fileResult of report.fileResults) {
       if (fileResult.hasDefects && fileResult.defects.length > 0) {
         const validDefects = fileResult.defects.filter(defect => 
           !this.isPlaceholderDefectInMarkdown(defect)
         );
         
-        validDefects.forEach(defect => {
+        for (const defect of validDefects) {
           // 优先使用原始字段，如果没有则从 description 中分离
           let risk = '';
           let howToTrigger = '';
           
           if (defect.risk && defect.howToTrigger) {
-            // 使用保留的原始字段
-            risk = this.escapeCSV(this.translateText(defect.risk, language));
-            howToTrigger = this.escapeCSV(this.translateText(defect.howToTrigger, language));
+            // 使用保留的原始字段并翻译
+            risk = this.escapeCSV(await this.translateText(defect.risk, targetLang));
+            howToTrigger = this.escapeCSV(await this.translateText(defect.howToTrigger, targetLang));
           } else {
             // 降级方案：从 description 中分离
             const descriptionParts = defect.description.split(' - ');
-            risk = this.escapeCSV(this.translateText(descriptionParts[0] || '', language));
-            howToTrigger = this.escapeCSV(this.translateText(descriptionParts.slice(1).join(' - ') || '', language));
+            risk = this.escapeCSV(await this.translateText(descriptionParts[0] || '', targetLang));
+            howToTrigger = this.escapeCSV(await this.translateText(descriptionParts.slice(1).join(' - ') || '', targetLang));
           }
           
           // 优先使用原始的 functionSymbol，如果没有则从 code 中提取第一行
@@ -471,11 +479,12 @@ class ReportGenerationServiceImpl {
           const lines = defect.lines || (defect.line > 0 ? `L${defect.line}` : '');
           
           const confidence = defect.severity === 'high' ? 'High' : defect.severity === 'low' ? 'Low' : 'Medium';
-          const translatedRecommendation = this.translateText(defect.recommendation, language);
+          const translatedRecommendation = await this.translateText(defect.recommendation, targetLang);
+          const translatedType = await this.translateText(defect.type, targetLang);
           
           const row = [
             defectIndex++,
-            this.escapeCSV(this.translateText(defect.type, language)),
+            this.escapeCSV(translatedType),
             this.escapeCSV(fileResult.file.path),
             functionSymbol,
             snippet,
@@ -487,9 +496,9 @@ class ReportGenerationServiceImpl {
           ];
           
           csv += row.join(',') + '\n';
-        });
+        }
       }
-    });
+    }
     
     console.log(`[DEBUG exportReportAsCSV] 生成的 CSV 行数: ${csv.split('\n').length - 1}, 缺陷数: ${defectIndex - 1}`);
     
@@ -577,10 +586,10 @@ class ReportGenerationServiceImpl {
    * @param {DetectionReport} report - Report to export
    * @param {string} format - Export format ('csv' or 'json')
    * @param {Object} [options] - Export options
-   * @returns {Object} Export result with content and metadata
+   * @returns {Promise<Object>} Export result with content and metadata
    */
-  exportReport(report, format = 'csv', options = {}) {
-    const { language = 'zh-CN', pretty = true } = options;
+  async exportReport(report, format = 'csv', options = {}) {
+    const { targetLang = 'zh', pretty = true } = options;
     
     let content;
     let mimeType;
@@ -588,7 +597,7 @@ class ReportGenerationServiceImpl {
     
     switch (format.toLowerCase()) {
       case 'csv':
-        content = this.exportReportAsCSV(report, language);
+        content = await this.exportReportAsCSV(report, targetLang);
         mimeType = 'text/csv;charset=utf-8;';
         extension = 'csv';
         break;
@@ -607,7 +616,7 @@ class ReportGenerationServiceImpl {
       content,
       mimeType,
       extension,
-      filename: this.generateExportFilename(report, extension),
+      filename: this.generateExportFilename(report, extension, targetLang),
       size: new Blob([content]).size,
       timestamp: new Date().toISOString()
     };
@@ -617,12 +626,19 @@ class ReportGenerationServiceImpl {
    * Generate export filename
    * @param {DetectionReport} report - Report
    * @param {string} extension - File extension
+   * @param {string} [targetLang='zh'] - Target language
    * @returns {string} Filename
    */
-  generateExportFilename(report, extension) {
+  generateExportFilename(report, extension, targetLang = 'zh') {
     const groupName = report.groupName || 'report';
     const timestamp = new Date(report.timestamp).toISOString().replace(/[:.]/g, '-').split('T')[0];
-    return `${groupName.toLowerCase()}_${timestamp}.${extension}`;
+    
+    // Add language suffix for non-Chinese exports
+    const langSuffix = (targetLang && targetLang !== 'zh' && targetLang !== 'zh-CN') 
+      ? `_${targetLang}` 
+      : '';
+    
+    return `${groupName.toLowerCase()}${langSuffix}_${timestamp}.${extension}`;
   }
 
   /**
@@ -685,32 +701,78 @@ class ReportGenerationServiceImpl {
 
   /**
    * Download report with proper headers and formatting
+   * Supports bilingual download (Chinese + translated version)
    * @param {DetectionReport} report - Report to download
    * @param {string} [groupName] - Group name
-   * @param {string} [language='zh-CN'] - Target language
    * @param {string} [format='csv'] - Export format ('csv' or 'json')
    * @returns {Promise<void>}
    */
-  downloadReport(report, groupName, language = 'zh-CN', format = 'csv') {
-    return new Promise((resolve) => {
-      if (typeof window === 'undefined') {
-        // In Node.js environment, return directly
-        resolve();
-        return;
-      }
+  async downloadReport(report, groupName, format = 'csv') {
+    if (typeof window === 'undefined') {
+      // In Node.js environment, return directly
+      return;
+    }
 
+    try {
+      console.log(`[DEBUG downloadReport] 开始下载报告`);
+      console.log(`[DEBUG downloadReport] 报告数据:`, {
+        groupName: groupName || report.groupName,
+        hasFileResults: !!report.fileResults,
+        fileResultsCount: report.fileResults?.length || 0,
+        totalDefects: report.totalDefects,
+        format: format
+      });
+      
+      // Detect user language
+      const userLang = detectUserLanguage();
+      const needsTranslationFlag = needsTranslation();
+      
+      console.log(`🌐 User language: ${userLang}, needs translation: ${needsTranslationFlag}`);
+      
+      // Prioritize groupName parameter, then use groupName in report
+      const finalGroupName = groupName || report.groupName;
+      
+      if (userLang === 'zh' || !needsTranslationFlag) {
+        // Chinese environment: download only Chinese version
+        console.log('📥 Downloading Chinese version only...');
+        await this.downloadFile(report, finalGroupName, 'zh', format);
+      } else {
+        // Non-Chinese environment: download both Chinese and translated versions
+        console.log('📥 Downloading bilingual versions (Chinese + translated)...');
+        
+        // 1. Download Chinese original
+        await this.downloadFile(report, finalGroupName, 'zh', format);
+        
+        // 2. Wait 500ms to avoid browser blocking
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // 3. Download translated version
+        await this.downloadFile(report, finalGroupName, userLang, format);
+      }
+      
+      console.log(`✅ Download completed`);
+    } catch (error) {
+      console.error('❌ Download failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Download a single file
+   * @private
+   * @param {DetectionReport} report - Report to download
+   * @param {string} groupName - Group name
+   * @param {string} targetLang - Target language
+   * @param {string} format - Export format
+   * @returns {Promise<void>}
+   */
+  async downloadFile(report, groupName, targetLang, format) {
+    return new Promise(async (resolve) => {
       try {
-        console.log(`[DEBUG downloadReport] 开始下载报告`);
-        console.log(`[DEBUG downloadReport] 报告数据:`, {
-          groupName: groupName || report.groupName,
-          hasFileResults: !!report.fileResults,
-          fileResultsCount: report.fileResults?.length || 0,
-          totalDefects: report.totalDefects,
-          format: format
-        });
+        console.log(`[downloadFile] Generating ${format} for language: ${targetLang}`);
         
         // Use the new export method
-        const exportResult = this.exportReport(report, format, { language, pretty: true });
+        const exportResult = await this.exportReport(report, format, { targetLang, pretty: true });
         
         // Add UTF-8 BOM for CSV files to ensure proper encoding in Excel
         let content = exportResult.content;
@@ -725,13 +787,13 @@ class ReportGenerationServiceImpl {
         const blob = new Blob([content], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         
-        // Prioritize groupName parameter, then use groupName in report
-        const finalGroupName = groupName || report.groupName;
-        const fileName = finalGroupName 
-          ? `${finalGroupName.toLowerCase()}.${exportResult.extension}`
-          : exportResult.filename;
+        // Generate filename with language suffix
+        const langSuffix = (targetLang && targetLang !== 'zh' && targetLang !== 'zh-CN') 
+          ? `_${targetLang}` 
+          : '';
+        const fileName = `${groupName.toLowerCase()}${langSuffix}.${exportResult.extension}`;
         
-        console.log(`[downloadReport] 生成的文件名: ${fileName}, 格式: ${format}, 大小: ${exportResult.size} bytes`);
+        console.log(`[downloadFile] 生成的文件名: ${fileName}, 格式: ${format}, 大小: ${exportResult.size} bytes`);
         
         const link = document.createElement('a');
         link.href = url;
@@ -753,7 +815,7 @@ class ReportGenerationServiceImpl {
         
         console.log(`触发下载: ${fileName}`);
       } catch (error) {
-        console.error('下载报告失败:', error);
+        console.error('下载文件失败:', error);
         resolve(); // Resolve even on error
       }
     });
@@ -1092,17 +1154,114 @@ class ReportGenerationServiceImpl {
   }
 
   /**
-   * Translate text
+   * Translate text using enhanced hybrid translation service
    * @param {string} text - Original text (usually Chinese)
-   * @param {string} language - Target language
-   * @returns {string} - Translated text
+   * @param {string} targetLang - Target language code
+   * @returns {Promise<string>} - Translated text
    */
-  translateText(text, language) {
-    if (language === 'zh-CN' || !text) {
+  async translateText(text, targetLang) {
+    if (!text || targetLang === 'zh' || targetLang === 'zh-CN') {
       return text;
     }
-    // Placeholder for translation - would use actual translation service
-    return text;
+    
+    try {
+      // Use enhanced translation with quality checks
+      const result = await enhancedTranslate(
+        text,
+        (t, lang) => this.translationService.translateText(t, lang),
+        targetLang,
+        {
+          maxRetries: 2,
+          useMixedMode: true,
+          validateResult: true
+        }
+      );
+      
+      // Log quality issues
+      if (result.validation && !result.validation.isValid) {
+        console.warn(`⚠️ Translation quality issues for: "${text.substring(0, 50)}..."`, result.validation.issues);
+      }
+      
+      // Check if result still contains Chinese
+      if (containsChinese(result.text)) {
+        console.error(`❌ Translation failed - still contains Chinese: "${result.text}"`);
+        console.error(`   Original: "${text}"`);
+        
+        // Last resort: return original with warning
+        return `[TRANSLATION_INCOMPLETE] ${result.text}`;
+      }
+      
+      return result.text;
+    } catch (error) {
+      console.error('Translation failed, using original text:', error);
+      return text;
+    }
+  }
+
+  /**
+   * Translate entire report
+   * @param {DetectionReport} report - Report to translate
+   * @param {string} targetLang - Target language code
+   * @returns {Promise<DetectionReport>} - Translated report
+   */
+  async translateReport(report, targetLang) {
+    if (!report || targetLang === 'zh' || targetLang === 'zh-CN') {
+      return report;
+    }
+
+    console.log(`🌐 Translating report to ${targetLang}...`);
+    const startTime = Date.now();
+
+    try {
+      // Create a copy to avoid mutating original
+      const translatedReport = JSON.parse(JSON.stringify(report));
+
+      // Translate all file results
+      for (const fileResult of translatedReport.fileResults) {
+        if (fileResult.hasDefects && fileResult.defects) {
+          // Translate each defect
+          for (let i = 0; i < fileResult.defects.length; i++) {
+            const defect = fileResult.defects[i];
+            
+            // Translate defect fields
+            if (defect.type) {
+              defect.type = await this.translateText(defect.type, targetLang);
+            }
+            if (defect.description) {
+              defect.description = await this.translateText(defect.description, targetLang);
+            }
+            if (defect.recommendation) {
+              defect.recommendation = await this.translateText(defect.recommendation, targetLang);
+            }
+            if (defect.risk) {
+              defect.risk = await this.translateText(defect.risk, targetLang);
+            }
+            if (defect.howToTrigger) {
+              defect.howToTrigger = await this.translateText(defect.howToTrigger, targetLang);
+            }
+            
+            // Note: code, snippet, functionSymbol, file paths are NOT translated
+          }
+        }
+      }
+
+      const duration = Date.now() - startTime;
+      console.log(`✅ Report translation completed in ${duration}ms`);
+
+      // Add translation metadata
+      if (!translatedReport.metadata) {
+        translatedReport.metadata = {};
+      }
+      translatedReport.metadata.translatedTo = targetLang;
+      translatedReport.metadata.translationDuration = duration;
+      translatedReport.metadata.translatedAt = new Date().toISOString();
+
+      return translatedReport;
+    } catch (error) {
+      console.error('❌ Report translation failed:', error);
+      // Return original report on error
+      return report;
+    }
   }
 }
 

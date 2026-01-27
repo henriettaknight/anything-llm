@@ -1,11 +1,17 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { detectUserLanguage, needsTranslation } from "@/utils/AutoDetectionEngine/utils/languageDetector";
 
 export default function ReportPanel({ reports, onDownload, onDelete }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [isDownloading, setIsDownloading] = useState({});
   const [isDeleting, setIsDeleting] = useState({});
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
+
+  // Get current language and translation status
+  const currentLang = detectUserLanguage();
+  const willTranslate = needsTranslation();
 
   const handleDownload = async (reportId) => {
     setIsDownloading((prev) => ({ ...prev, [reportId]: true }));
@@ -53,11 +59,7 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
         </h2>
         {reports && reports.length > 0 && (
           <button
-            onClick={() => {
-              if (window.confirm(t("autodetection.reports.confirmDeleteAll", "Delete all reports?"))) {
-                reports.forEach(report => handleDelete(report.id));
-              }
-            }}
+            onClick={() => setDeleteAllConfirm(true)}
             className="px-3 py-1 bg-gray-50 text-gray-800 text-sm rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border border-gray-200"
             title={t("autodetection.reports.deleteAllButton", "Delete All")}
           >
@@ -125,8 +127,12 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
                     title={t("autodetection.reports.downloadButton", "Download")}
                   >
                     {isDownloading[report.id]
-                      ? t("autodetection.reports.downloading", "Downloading...")
-                      : t("autodetection.reports.download", "Download")}
+                      ? (willTranslate 
+                          ? t("autodetection.reports.translating", "Translating...") 
+                          : t("autodetection.reports.downloading", "Downloading..."))
+                      : (willTranslate
+                          ? t("autodetection.reports.downloadBilingual", "Download (2 files)")
+                          : t("autodetection.reports.download", "Download"))}
                   </button>
 
                   <button
@@ -212,8 +218,65 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
               "Delete reports to manage storage space"
             )}
           </li>
+          {willTranslate && (
+            <li className="text-theme-accent-primary">
+              🌐 {t(
+                "autodetection.reports.bilingualDownload",
+                "Bilingual download: Chinese original + translated version"
+              )}
+            </li>
+          )}
         </ul>
+        
+        {/* Language Status */}
+        <div className="mt-3 pt-3 border-t border-theme-sidebar-border">
+          <p className="text-xs">
+            <span className="font-semibold">{t("autodetection.reports.currentLanguage", "Current Language")}:</span>{" "}
+            <span className="text-theme-text-primary">
+              {currentLang === 'zh' ? '中文 (Chinese)' : 
+               currentLang === 'en' ? 'English' :
+               currentLang === 'ja' ? '日本語 (Japanese)' :
+               currentLang}
+            </span>
+          </p>
+          {willTranslate && (
+            <p className="text-xs mt-1 text-theme-accent-primary">
+              ✓ {t("autodetection.reports.translationEnabled", "Translation enabled for downloads")}
+            </p>
+          )}
+        </div>
       </div>
+
+      {/* Delete All Confirmation Modal */}
+      {deleteAllConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-theme-bg-secondary rounded-lg border border-theme-sidebar-border max-w-sm w-full p-6">
+            <h3 className="text-lg font-semibold text-theme-text-primary mb-4">
+              {t("autodetection.reports.confirmDeleteAll", "Delete all reports?")}
+            </h3>
+            <p className="text-sm text-theme-text-secondary mb-6">
+              {t("autodetection.reports.deleteAllWarning", "This action cannot be undone. All reports will be permanently deleted.")}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  reports.forEach(report => handleDelete(report.id));
+                  setDeleteAllConfirm(false);
+                }}
+                className="flex-1 px-4 py-2 bg-gray-50 text-gray-800 text-sm rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border border-gray-200"
+              >
+                {t("autodetection.reports.confirmDelete", "Confirm Delete")}
+              </button>
+              <button
+                onClick={() => setDeleteAllConfirm(false)}
+                className="flex-1 px-4 py-2 bg-theme-bg-primary border border-theme-sidebar-border text-theme-text-primary text-sm rounded hover:bg-theme-bg-secondary transition-colors"
+              >
+                {t("autodetection.reports.cancel", "Cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
