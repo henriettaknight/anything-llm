@@ -34,6 +34,45 @@ const app = express();
 const apiRouter = express.Router();
 const FILE_LIMIT = "3GB";
 
+// Initialize Keycloak if enabled
+if (process.env.KEYCLOAK_ENABLED === "true") {
+  try {
+    console.log("[Keycloak] Keycloak authentication is enabled");
+    
+    // Validate required environment variables
+    const requiredVars = [
+      "KEYCLOAK_SESSION_SECRET",
+      "KEYCLOAK_REALM",
+      "KEYCLOAK_AUTH_SERVER_URL",
+      "KEYCLOAK_CLIENT_ID",
+    ];
+    
+    const missingVars = requiredVars.filter((varName) => !process.env[varName]);
+    
+    if (missingVars.length > 0) {
+      console.error(
+        `[Keycloak] ERROR: Missing required environment variables: ${missingVars.join(", ")}`
+      );
+      console.error(
+        "[Keycloak] Please set all required environment variables before enabling Keycloak"
+      );
+      process.exit(1);
+    }
+    
+    // Initialize Keycloak middleware
+    const { initKeycloak } = require("./utils/middleware/keycloakAuth");
+    initKeycloak(app);
+    
+    console.log("[Keycloak] Keycloak middleware initialized successfully");
+  } catch (error) {
+    console.error("[Keycloak] Failed to initialize Keycloak:", error.message);
+    console.error("[Keycloak] Stack trace:", error.stack);
+    process.exit(1);
+  }
+} else {
+  console.log("[Keycloak] Keycloak authentication is disabled");
+}
+
 // Only log HTTP requests in development mode and if the ENABLE_HTTP_LOGGER environment variable is set to true
 if (
   process.env.NODE_ENV === "development" &&

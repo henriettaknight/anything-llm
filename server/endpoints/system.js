@@ -114,6 +114,42 @@ function systemEndpoints(app) {
     }
   );
 
+  app.get(
+    "/system/me",
+    [validatedRequest],
+    async (request, response) => {
+      try {
+        const isMultiUser = await SystemSettings.isMultiUserMode();
+        
+        if (isMultiUser) {
+          // User is already validated and cached in response.locals by validatedRequest middleware
+          const user = response.locals?.user;
+          
+          if (!user) {
+            response.status(401).json({ error: 'No user found', user: null });
+            return;
+          }
+          
+          if (user.suspended) {
+            response.sendStatus(403).end();
+            return;
+          }
+
+          // Return user info without sensitive fields
+          response.status(200).json({
+            user: User.filterFields(user)
+          });
+          return;
+        }
+
+        response.status(200).json({ user: null });
+      } catch (e) {
+        console.error(e.message, e);
+        response.sendStatus(500).end();
+      }
+    }
+  );
+
   app.post("/request-token", async (request, response) => {
     try {
       const bcrypt = require("bcrypt");

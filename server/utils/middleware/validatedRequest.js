@@ -2,9 +2,20 @@ const { SystemSettings } = require("../../models/systemSettings");
 const { User } = require("../../models/user");
 const { EncryptionManager } = require("../EncryptionManager");
 const { decodeJWT } = require("../http");
+const { 
+  userFromSession: keycloakUserFromSession, 
+  isKeycloakEnabled 
+} = require("./authAdapter");
 const EncryptionMgr = new EncryptionManager();
 
 async function validatedRequest(request, response, next) {
+  // Check if Keycloak is enabled
+  if (isKeycloakEnabled()) {
+    // Use Keycloak authentication adapter
+    return await keycloakUserFromSession(request, response, next);
+  }
+
+  // Use existing authentication logic when Keycloak is disabled
   const multiUserMode = await SystemSettings.isMultiUserMode();
   response.locals.multiUserMode = multiUserMode;
   if (multiUserMode)

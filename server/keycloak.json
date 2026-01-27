@@ -1,0 +1,9 @@
+{
+  "realm": "anythingllm",
+  "bearer-only": true,
+  "auth-server-url": "http://localhost:8180",
+  "ssl-required": "external",
+  "resource": "anythingllm-backend",
+  "confidential-port": 0,
+  "verify-token-audience": true
+}

@@ -1,5 +1,6 @@
 const { SystemSettings } = require("../../models/systemSettings");
 const { userFromSession } = require("../http");
+const { isKeycloakEnabled } = require("./authAdapter");
 const ROLES = {
   all: "<all>",
   admin: "admin",
@@ -7,6 +8,37 @@ const ROLES = {
   default: "default",
 };
 const DEFAULT_ROLES = [ROLES.admin, ROLES.admin];
+
+/**
+ * Check if user has any of the required roles
+ * Supports both Keycloak and local role systems
+ * @param {Object} user - User object
+ * @param {string[]} allowedRoles - Array of allowed roles
+ * @param {import('express').Request} request - Express request object
+ * @returns {boolean} True if user has any allowed role
+ */
+function userHasRole(user, allowedRoles, request) {
+  if (!user || !allowedRoles || allowedRoles.length === 0) {
+    return false;
+  }
+
+  // Check local role first (from database)
+  if (allowedRoles.includes(user.role)) {
+    return true;
+  }
+
+  // If Keycloak is enabled and user is authenticated via Keycloak, check Keycloak roles
+  if (isKeycloakEnabled() && user._isKeycloakAuth) {
+    const keycloakRoles = user._keycloakRoles || [];
+    for (const allowedRole of allowedRoles) {
+      if (keycloakRoles.includes(allowedRole)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
 
 /**
  * Explicitly check that multi user mode is enabled as well as that the
@@ -22,14 +54,19 @@ function strictMultiUserRoleValid(allowedRoles = DEFAULT_ROLES) {
       return;
     }
 
-    const multiUserMode =
-      response.locals?.multiUserMode ??
-      (await SystemSettings.isMultiUserMode());
-    if (!multiUserMode) return response.sendStatus(401).end();
+    // When Keycloak is enabled, skip multi-user mode check
+    // Keycloak handles authentication independently
+    if (!isKeycloakEnabled()) {
+      const multiUserMode =
+        response.locals?.multiUserMode ??
+        (await SystemSettings.isMultiUserMode());
+      if (!multiUserMode) return response.sendStatus(401).end();
+    }
 
     const user =
       response.locals?.user ?? (await userFromSession(request, response));
-    if (allowedRoles.includes(user?.role)) {
+    
+    if (userHasRole(user, allowedRoles, request)) {
       next();
       return;
     }
@@ -52,7 +89,19 @@ function flexUserRoleValid(allowedRoles = DEFAULT_ROLES) {
       return;
     }
 
-    // Bypass if not in multi-user mode
+    // When Keycloak is enabled, always check roles
+    if (isKeycloakEnabled()) {
+      const user =
+        response.locals?.user ?? (await userFromSession(request, response));
+      
+      if (userHasRole(user, allowedRoles, request)) {
+        next();
+        return;
+      }
+      return response.sendStatus(401).end();
+    }
+
+    // Bypass if not in multi-user mode (legacy behavior)
     const multiUserMode =
       response.locals?.multiUserMode ??
       (await SystemSettings.isMultiUserMode());
@@ -63,7 +112,7 @@ function flexUserRoleValid(allowedRoles = DEFAULT_ROLES) {
 
     const user =
       response.locals?.user ?? (await userFromSession(request, response));
-    if (allowedRoles.includes(user?.role)) {
+    if (userHasRole(user, allowedRoles, request)) {
       next();
       return;
     }
