@@ -132,55 +132,61 @@ export class DirectAIAdapter {
 
       console.log('\n📡 Starting to read stream...');
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          console.log('\n✅ Stream completed:');
-          console.log('  - Total chunks:', chunkCount);
-          console.log('  - Total content length:', totalContent.length);
-          console.log('  - First 500 chars of response:', totalContent.substring(0, 500));
-          console.log('  - Last 200 chars of response:', totalContent.substring(totalContent.length - 200));
-          console.log('='.repeat(80) + '\n');
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim() || !line.startsWith('data: ')) continue;
-
-          const data = line.slice(6);
-          if (data === '[DONE]') {
-            console.log('\n✓ Received [DONE] signal');
-            return;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            console.log('\n✅ Stream completed:');
+            console.log('  - Total chunks:', chunkCount);
+            console.log('  - Total content length:', totalContent.length);
+            console.log('  - First 500 chars of response:', totalContent.substring(0, 500));
+            console.log('  - Last 200 chars of response:', totalContent.substring(totalContent.length - 200));
+            console.log('='.repeat(80) + '\n');
+            break;
           }
 
-          try {
-            const parsed = JSON.parse(data);
-            const content = parsed.choices?.[0]?.delta?.content || '';
-            if (content) {
-              chunkCount++;
-              totalContent += content;
-              
-              if (!firstChunkReceived) {
-                console.log('\n🎯 First chunk received:');
-                console.log('  - Content:', JSON.stringify(content));
-                console.log('  - Parsed structure:', JSON.stringify(parsed, null, 2));
-                firstChunkReceived = true;
-              }
-              
-              if (chunkCount % 50 === 0) {
-                console.log(`  📊 Progress: ${chunkCount} chunks, ${totalContent.length} chars`);
-              }
-              
-              yield content;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.trim() || !line.startsWith('data: ')) continue;
+
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              console.log('\n✓ Received [DONE] signal');
+              return;
             }
-          } catch (e) {
-            console.warn('⚠️ Failed to parse chunk:', e, 'Line:', line);
+
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices?.[0]?.delta?.content || '';
+              if (content) {
+                chunkCount++;
+                totalContent += content;
+                
+                if (!firstChunkReceived) {
+                  console.log('\n🎯 First chunk received:');
+                  console.log('  - Content:', JSON.stringify(content));
+                  console.log('  - Parsed structure:', JSON.stringify(parsed, null, 2));
+                  firstChunkReceived = true;
+                }
+                
+                if (chunkCount % 50 === 0) {
+                  console.log(`  📊 Progress: ${chunkCount} chunks, ${totalContent.length} chars`);
+                }
+                
+                yield content;
+              }
+            } catch (e) {
+              console.warn('⚠️ Failed to parse chunk:', e, 'Line:', line);
+            }
           }
         }
+      } finally {
+        // 确保 reader 被释放
+        reader.releaseLock();
+        console.log('🔓 Reader lock released');
       }
     } catch (error) {
       if (error.name === 'AbortError') {

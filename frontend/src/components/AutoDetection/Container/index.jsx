@@ -33,13 +33,28 @@ export default function AutoDetectionContainer() {
     loadInitialData();
   }, []);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      console.log('🧹 Cleaning up AutoDetection component');
+      // Component is unmounting, ensure all intervals are cleared
+    };
+  }, []);
+
   // Poll for status updates when detection is running
   useEffect(() => {
     if (status.status === "running") {
       const interval = setInterval(() => {
         loadStatus();
       }, 5000); // Poll every 5 seconds
-      return () => clearInterval(interval);
+      return () => {
+        console.log('🛑 Clearing status polling interval');
+        clearInterval(interval);
+      };
+    }
+    // Also clear when status changes to completed or error
+    if (status.status === "completed" || status.status === "error" || status.status === "idle") {
+      console.log(`✅ Detection status is ${status.status}, polling stopped`);
     }
   }, [status.status]);
 
@@ -105,11 +120,28 @@ export default function AutoDetectionContainer() {
     try {
       const result = await AutoDetectionAPI.getStatus();
       if (result.success) {
-        setStatus(result.status || {
+        const newStatus = result.status || {
           status: "idle",
           progress: { completed: 0, total: 0 },
           timeToDetection: null,
           error: null,
+        };
+        
+        // Only update if status actually changed or if still running
+        setStatus(prevStatus => {
+          // If previous status was completed/error and new status is the same, don't update
+          if ((prevStatus.status === "completed" || prevStatus.status === "error") && 
+              prevStatus.status === newStatus.status) {
+            console.log(`⏸️ Skipping status update - already in final state: ${prevStatus.status}`);
+            return prevStatus;
+          }
+          
+          // Log status changes
+          if (prevStatus.status !== newStatus.status) {
+            console.log(`📊 Status changed: ${prevStatus.status} → ${newStatus.status}`);
+          }
+          
+          return newStatus;
         });
       }
     } catch (error) {
@@ -172,7 +204,10 @@ export default function AutoDetectionContainer() {
         await loadReports();
         
         // 3. 触发下载（使用已经转换好的 detectionReport）
-        reportGenerationService.downloadReport(detectionReport, groupReport.groupName);
+        // 注意：不要 await downloadReport，让它在后台执行，避免阻塞
+        reportGenerationService.downloadReport(detectionReport, groupReport.groupName).catch(err => {
+          console.error('下载报告失败:', err);
+        });
       }
     } catch (error) {
       console.error(`处理分组报告失败: ${groupReport.groupName}`, error);

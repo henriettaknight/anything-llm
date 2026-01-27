@@ -612,21 +612,14 @@ class DetectionService {
     // Store the detection result for report generation
     this.lastDetectionResult = result;
 
-    // Update status to 'completed' instead of 'idle'
-    // This allows the UI to show the completion state
-    const newStatus = {
-      status: 'completed',
-      error: null,
-      detectionResult: {
-        ...result,
-        shouldGenerateReport: true // 标记需要生成报告
-      }
-    };
-    
-    console.log('Setting status with shouldGenerateReport:', newStatus);
-    this.updateStatus(newStatus);
+    // Update status to 'idle' directly
+    // Report generation is handled by onReportGenerated callback in detectionOrchestrator
+    this.updateStatus({
+      status: 'idle',
+      error: null
+    });
 
-    console.log('Detection completed, status updated to completed');
+    console.log('Detection completed, status updated to idle');
 
     // Clear session
     this.clearSession();
