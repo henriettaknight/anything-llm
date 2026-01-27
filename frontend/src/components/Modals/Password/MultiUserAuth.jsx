@@ -324,15 +324,129 @@ export default function MultiUserAuth() {
             </div>
           </div>
           <div className="flex items-center md:p-12 px-10 mt-12 md:mt-0 space-x-2 border-gray-600 w-full flex-col gap-y-8">
-            <button
-              disabled={loading}
-              type="submit"
-              className="md:text-primary-button md:bg-transparent text-dark-text text-sm font-bold focus:ring-4 focus:outline-none rounded-md border-[1.5px] border-primary-button md:h-[34px] h-[48px] md:hover:text-white md:hover:bg-primary-button bg-primary-button focus:z-10 w-full"
-            >
-              {loading
-                ? t("login.multi-user.validating")
-                : t("login.multi-user.login")}
-            </button>
+            {/* Hide local login button when Keycloak is enabled */}
+            {import.meta.env.VITE_KEYCLOAK_ENABLED !== 'true' && (
+              <button
+                disabled={loading}
+                type="submit"
+                className="md:text-primary-button md:bg-transparent text-dark-text text-sm font-bold focus:ring-4 focus:outline-none rounded-md border-[1.5px] border-primary-button md:h-[34px] h-[48px] md:hover:text-white md:hover:bg-primary-button bg-primary-button focus:z-10 w-full"
+              >
+                {loading
+                  ? t("login.multi-user.validating")
+                  : t("login.multi-user.login")}
+              </button>
+            )}
+            
+            {/* Keycloak Login Button */}
+            {import.meta.env.VITE_KEYCLOAK_ENABLED === 'true' && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={async () => {
+                  setError(null);
+                  setLoading(true);
+                  
+                  try {
+                    // Get username and password from form
+                    const formData = new FormData(document.querySelector('form'));
+                    const username = formData.get('username');
+                    const password = formData.get('password');
+                    
+                    if (!username || !password) {
+                      setError('Please enter username and password');
+                      setLoading(false);
+                      return;
+                    }
+                    
+                    // Get token from Keycloak using password grant
+                    const keycloakUrl = import.meta.env.VITE_KEYCLOAK_URL;
+                    const realm = import.meta.env.VITE_KEYCLOAK_REALM;
+                    const clientId = import.meta.env.VITE_KEYCLOAK_CLIENT_ID;
+                    const tokenUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/token`;
+                    
+                    const params = new URLSearchParams();
+                    params.append('grant_type', 'password');
+                    params.append('client_id', clientId);
+                    params.append('username', username);
+                    params.append('password', password);
+                    
+                    const tokenResponse = await fetch(tokenUrl, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                      },
+                      body: params.toString(),
+                    });
+                    
+                    if (!tokenResponse.ok) {
+                      const errorData = await tokenResponse.json();
+                      throw new Error(errorData.error_description || 'Keycloak authentication failed');
+                    }
+                    
+                    const tokenData = await tokenResponse.json();
+                    const accessToken = tokenData.access_token;
+                    
+                    // Get user info from backend (backend will validate token and provision user)
+                    const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+                    const userInfoResponse = await fetch(`${API_BASE}/system/me`, {
+                      headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                      },
+                    });
+                    
+                    if (!userInfoResponse.ok) {
+                      throw new Error('Failed to get user information from backend');
+                    }
+                    
+                    const userInfoData = await userInfoResponse.json();
+                    const user = userInfoData.user;
+                    
+                    if (!user) {
+                      throw new Error('No user information returned from backend');
+                    }
+                    
+                    // Store token and user info
+                    window.localStorage.setItem(AUTH_TOKEN, accessToken);
+                    window.localStorage.setItem(AUTH_USER, JSON.stringify(user));
+                    
+                    // Redirect to home
+                    window.location = paths.home();
+                    
+                  } catch (error) {
+                    console.error('Keycloak login error:', error);
+                    setError(error.message);
+                    setLoading(false);
+                  }
+                }}
+                className="md:text-white md:bg-blue-600 text-white text-sm font-bold focus:ring-4 focus:outline-none rounded-md border-[1.5px] border-blue-600 md:h-[34px] h-[48px] md:hover:bg-blue-700 bg-blue-600 focus:z-10 w-full flex items-center justify-center gap-x-2"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M11.5 0L0 6v12l11.5 6L23 18V6L11.5 0zm0 2.15L20.85 7v10L11.5 21.85 2.15 17V7L11.5 2.15z"/>
+                </svg>
+                {loading ? 'Authenticating...' : 'Login with Keycloak'}
+              </button>
+            )}
+            
+            {/* Register with Keycloak Button */}
+            {import.meta.env.VITE_KEYCLOAK_ENABLED === 'true' && (
+              <button
+                type="button"
+                onClick={() => {
+                  const keycloakUrl = import.meta.env.VITE_KEYCLOAK_URL;
+                  const realm = import.meta.env.VITE_KEYCLOAK_REALM;
+                  const clientId = import.meta.env.VITE_KEYCLOAK_CLIENT_ID;
+                  const redirectUri = encodeURIComponent(window.location.origin);
+                  
+                  // Redirect to Keycloak registration page
+                  const registerUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/registrations?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}`;
+                  window.location.href = registerUrl;
+                }}
+                className="text-white text-sm flex gap-x-1 hover:text-primary-button hover:underline"
+              >
+                Don't have an account? <b>Register</b>
+              </button>
+            )}
+            
             <button
               type="button"
               className="text-white text-sm flex gap-x-1 hover:text-primary-button hover:underline"

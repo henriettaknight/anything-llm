@@ -2617,6 +2617,11 @@ katex@^0.6.0:
   dependencies:
     match-at "^0.1.0"
 
+keycloak-js@^26.2.2:
+  version "26.2.2"
+  resolved "https://registry.npmmirror.com/keycloak-js/-/keycloak-js-26.2.2.tgz#857ea50b89d6c979870919d525991f6553a6edb0"
+  integrity sha512-ug7pNZ1xNkd7PPkerOJCEU2VnUhS7CYStDOCFJgqCNQ64h53ppxaKrh4iXH0xM8hFu5b1W6e6lsyYWqBMvaQFg==
+
 keyv@^4.5.3:
   version "4.5.4"
   resolved "https://registry.npmmirror.com/keyv/-/keyv-4.5.4.tgz#a879a99e29452f942439f2a405e3af8b31d4de93"

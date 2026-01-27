@@ -8,6 +8,7 @@ import PrivateRoute, {
 } from "@/components/PrivateRoute";
 import Login from "@/pages/Login";
 import SimpleSSOPassthrough from "@/pages/Login/SSO/simple";
+import KeycloakCallback from "@/pages/Login/KeycloakCallback";
 import OnboardingFlow from "@/pages/OnboardingFlow";
 import "@/index.css";
 
@@ -29,6 +30,10 @@ const router = createBrowserRouter([
       {
         path: "/login",
         element: <Login />,
+      },
+      {
+        path: "/login/callback",
+        element: <KeycloakCallback />,
       },
       {
         path: "/sso/simple",
