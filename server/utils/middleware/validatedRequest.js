@@ -9,6 +9,10 @@ const {
 const EncryptionMgr = new EncryptionManager();
 
 async function validatedRequest(request, response, next) {
+  // Set multiUserMode for all requests
+  const multiUserMode = await SystemSettings.isMultiUserMode();
+  response.locals.multiUserMode = multiUserMode;
+  
   // Check if Keycloak is enabled
   if (isKeycloakEnabled()) {
     // Use Keycloak authentication adapter
@@ -16,8 +20,6 @@ async function validatedRequest(request, response, next) {
   }
 
   // Use existing authentication logic when Keycloak is disabled
-  const multiUserMode = await SystemSettings.isMultiUserMode();
-  response.locals.multiUserMode = multiUserMode;
   if (multiUserMode)
     return await validateMultiUserRequest(request, response, next);
 
