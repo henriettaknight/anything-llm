@@ -251,11 +251,26 @@ const TRANSLATIONS = {
         "Этот параметр контролирует максимальное количество контекстных фрагментов, которые будут отправлены LLM для каждого чата или запроса.",
       recommend: "Рекомендуемое количество: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Порог сходства документов",
       description:
         "Минимальная оценка сходства, необходимая для того, чтобы источник считался связанным с чатом. Чем выше число, тем более схожим должен быть источник с чатом.",
       zero: "Без ограничений",
+      hybrid: "Только гибрид (оценка сходства ≥ .10)",
       low: "Низкий (оценка сходства ≥ .25)",
       medium: "Средний (оценка сходства ≥ .50)",
       high: "Высокий (оценка сходства ≥ .75)",

@@ -100,6 +100,8 @@ const memory = {
                   LLMConnector,
                   topN: workspace?.topN ?? 4,
                   rerank: workspace?.vectorSearchMode === "rerank",
+                  hybrid: workspace?.vectorSearchHybridEnabled,
+                  hybridAlpha: workspace?.vectorSearchHybridAlpha,
                 });
 
               if (contextTexts.length === 0) {

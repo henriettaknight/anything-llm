@@ -334,11 +334,26 @@ const TRANSLATIONS = {
         "Šis iestatījums kontrolē maksimālo konteksta fragmentu skaitu, kas tiks nosūtīti LLM katrai sarunai vai vaicājumam.",
       recommend: "Ieteicams: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Dokumentu līdzības slieksnis",
       description:
         "Minimālais līdzības rādītājs, kas nepieciešams, lai avots tiktu uzskatīts par saistītu ar sarunu. Jo lielāks skaitlis, jo līdzīgākam avotam jābūt sarunai.",
       zero: "Bez ierobežojuma",
+      hybrid: "Tikai hibrīds (līdzības rādītājs ≥ .10)",
       low: "Zems (līdzības vērtējums ≥ .25)",
       medium: "Vidējs (līdzības vērtējums ≥ .50)",
       high: "Augsts (līdzības vērtējums ≥ .75)",

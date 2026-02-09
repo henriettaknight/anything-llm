@@ -328,11 +328,26 @@ const TRANSLATIONS = {
         "הגדרה זו שולטת בכמות המרבית של מקטעי הקשר שיישלחו למודל השפה עבור כל צ'אט או שאילתה.",
       recommend: "מומלץ: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "סף דמיון מסמכים",
       description:
         "ציון הדמיון המינימלי הנדרש כדי שמקור ייחשב קשור לצ'אט. ככל שהמספר גבוה יותר, כך המקור חייב להיות דומה יותר לצ'אט.",
       zero: "ללא הגבלה",
+      hybrid: "היברידי בלבד (ציון דמיון ≥ .10)",
       low: "נמוך (ציון דמיון ≥ 0.25)",
       medium: "בינוני (ציון דמיון ≥ 0.50)",
       high: "גבוה (ציון דמיון ≥ 0.75)",

@@ -302,6 +302,8 @@ async function chatSync({
           topN: workspace?.topN,
           filterIdentifiers: pinnedDocIdentifiers,
           rerank: workspace?.vectorSearchMode === "rerank",
+          hybrid: workspace?.vectorSearchHybridEnabled,
+          hybridAlpha: workspace?.vectorSearchHybridAlpha,
         })
       : {
           contextTexts: [],
@@ -654,6 +656,8 @@ async function streamChat({
           topN: workspace?.topN,
           filterIdentifiers: pinnedDocIdentifiers,
           rerank: workspace?.vectorSearchMode === "rerank",
+          hybrid: workspace?.vectorSearchHybridEnabled,
+          hybridAlpha: workspace?.vectorSearchHybridAlpha,
         })
       : {
           contextTexts: [],

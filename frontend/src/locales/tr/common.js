@@ -242,11 +242,26 @@ const TRANSLATIONS = {
         "Bu ayar, sohbet veya sorgu başına LLM'e gönderilecek maksimum bağlam parçacığı sayısını kontrol eder.",
       recommend: "Önerilen: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Belge benzerlik eşiği",
       description:
         "Bir kaynağın sohbetle ilişkili sayılabilmesi için gereken minimum benzerlik puanı. Sayı yükseldikçe, kaynağın sohbete benzerliği de o kadar yüksek olmalıdır.",
       zero: "Kısıtlama yok",
+      hybrid: "Yalnızca hibrit (benzerlik puanı ≥ .10)",
       low: "Düşük (benzerlik puanı ≥ .25)",
       medium: "Orta (benzerlik puanı ≥ .50)",
       high: "Yüksek (benzerlik puanı ≥ .75)",

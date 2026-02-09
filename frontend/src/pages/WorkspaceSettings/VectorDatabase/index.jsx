@@ -4,6 +4,8 @@ import { castToType } from "@/utils/types";
 import { useRef, useState } from "react";
 import VectorDBIdentifier from "./VectorDBIdentifier";
 import MaxContextSnippets from "./MaxContextSnippets";
+import HybridSearchToggle from "./HybridSearchToggle";
+import HybridSearchAlpha from "./HybridSearchAlpha";
 import DocumentSimilarityThreshold from "./DocumentSimilarityThreshold";
 import ResetDatabase from "./ResetDatabase";
 import VectorCount from "./VectorCount";
@@ -59,6 +61,14 @@ export default function VectorDatabase({ workspace }) {
           setHasChanges={setHasChanges}
         />
         <DocumentSimilarityThreshold
+          workspace={workspace}
+          setHasChanges={setHasChanges}
+        />
+        <HybridSearchToggle
+          workspace={workspace}
+          setHasChanges={setHasChanges}
+        />
+        <HybridSearchAlpha
           workspace={workspace}
           setHasChanges={setHasChanges}
         />

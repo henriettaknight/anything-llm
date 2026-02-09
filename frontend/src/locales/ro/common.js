@@ -788,11 +788,26 @@ const TRANSLATIONS = {
         "Această setare controlează cantitatea maximă de fragmente de context care vor fi trimise către LLM per chat sau interogare (query).",
       recommend: "Recomandat",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Prag de similaritate document",
       description:
         "Scorul minim de similaritate necesar pentru ca o sursă să fie considerată relevantă pentru conversație (chat). Cu cât numărul este mai mare, cu atât sursa trebuie să fie mai asemănătoare cu conversația (chat).",
       zero: "Fără restricții",
+      hybrid: "Doar hibrid (scor de similaritate ≥ .10)",
       low: "Scăzut (scor de similaritate ≥ .25)",
       medium: "Mediu (scor de similaritate ≥ .50)",
       high: "Înalt (scor de similaritate ≥ .75)",

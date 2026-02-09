@@ -321,11 +321,24 @@ const TRANSLATIONS = {
         "此设置控制每次聊天或查询将发送到 LLM 的上下文片段的最大数量。",
       recommend: "推荐: 4",
     },
+    hybridToggle: {
+      title: "混合搜索",
+      description: "启用混合搜索以融合关键字与向量分数。",
+      enable: "启用",
+      disable: "禁用",
+      unsupported: "当前向量数据库暂不支持混合搜索。",
+    },
+    hybridAlpha: {
+      title: "混合搜索 α 权重",
+      description:
+        "控制混合搜索中关键字与向量检索的权重（0 = 仅关键字，1 = 仅向量）。",
+    },
     doc: {
       title: "文档相似性阈值",
       description:
         "源被视为与聊天相关所需的最低相似度分数。数字越高，来源与聊天就越相似。",
       zero: "无限制",
+      hybrid: "仅混合（相似度 ≥ .10）",
       low: "低（相似度分数 ≥ .25）",
       medium: "中（相似度分数 ≥ .50）",
       high: "高（相似度分数 ≥ .75）",

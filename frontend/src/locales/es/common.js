@@ -342,11 +342,26 @@ const TRANSLATIONS = {
         "Esta configuración controla la cantidad máxima de fragmentos de contexto que se enviarán al LLM por chat o consulta.",
       recommend: "Recomendado: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Umbral de similitud de documentos",
       description:
         "La puntuación de similitud mínima requerida para que una fuente se considere relacionada con el chat. Cuanto mayor sea el número, más similar debe ser la fuente al chat.",
       zero: "Sin restricción",
+      hybrid: "Solo híbrido (puntuación de similitud ≥ .10)",
       low: "Bajo (puntuación de similitud ≥ .25)",
       medium: "Medio (puntuación de similitud ≥ .50)",
       high: "Alto (puntuación de similitud ≥ .75)",

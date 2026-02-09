@@ -27,14 +27,50 @@ import useTextSize from "@/hooks/useTextSize";
 function combineLikeSources(sources) {
   const combined = {};
   sources.forEach((source) => {
-    const { id, title, text, chunkSource = "", score = null } = source;
+    const {
+      id,
+      title,
+      text,
+      chunkSource = "",
+      score = null,
+      vectorScore = null,
+      keywordScore = null,
+      hybridAlpha = null,
+      matchedTerms = null,
+      queryTerms = null,
+      searchType = null,
+    } = source;
     if (combined.hasOwnProperty(title)) {
-      combined[title].chunks.push({ id, text, chunkSource, score });
+      combined[title].chunks.push({
+        id,
+        text,
+        chunkSource,
+        score,
+        vectorScore,
+        keywordScore,
+        hybridAlpha,
+        matchedTerms,
+        queryTerms,
+        searchType,
+      });
       combined[title].references += 1;
     } else {
       combined[title] = {
         title,
-        chunks: [{ id, text, chunkSource, score }],
+        chunks: [
+          {
+            id,
+            text,
+            chunkSource,
+            score,
+            vectorScore,
+            keywordScore,
+            hybridAlpha,
+            matchedTerms,
+            queryTerms,
+            searchType,
+          },
+        ],
         references: 1,
       };
     }
@@ -174,25 +210,71 @@ function CitationDetailModal({ source, onClose }) {
           style={{ maxHeight: "calc(100vh - 200px)" }}
         >
           <div className="py-7 px-9 space-y-2 flex-col">
-            {chunks.map(({ text, score }, idx) => (
+            {renderChunksByType(chunks).map(
+              (
+                {
+                  text,
+                  score,
+                  vectorScore,
+                  keywordScore,
+                  hybridAlpha,
+                  matchedTerms,
+                  queryTerms,
+                  searchType,
+                },
+                idx
+              ) => (
               <>
                 <div key={idx} className="pt-6 text-white">
                   <div className="flex flex-col w-full justify-start pb-6 gap-y-1">
                     <p className="text-white whitespace-pre-line">
-                      {HTMLDecode(omitChunkHeader(text))}
+                      {renderHighlightedText(
+                        HTMLDecode(omitChunkHeader(text)),
+                        matchedTerms && matchedTerms.length > 0
+                          ? matchedTerms
+                          : queryTerms
+                      )}
                     </p>
 
-                    {!!score && (
+                    {Number.isFinite(vectorScore) &&
+                    Number.isFinite(keywordScore) &&
+                    Number.isFinite(hybridAlpha) ? (
                       <div className="w-full flex items-center text-xs text-white/60 gap-x-2 cursor-default">
                         <div
                           data-tooltip-id="similarity-score"
-                          data-tooltip-content={`This is the semantic similarity score of this chunk of text compared to your query calculated by the vector database.`}
+                          data-tooltip-content={`Hybrid score is a blend of keyword and vector matches.`}
                           className="flex items-center gap-x-1"
                         >
                           <Info size={14} />
-                          <p>{toPercentString(score)} match</p>
+                          <p>
+                            hybridScore({formatScore(score)}) =
+                            keywordScore({formatScore(keywordScore)})*
+                            {formatScore(1 - hybridAlpha)} + vectorScore(
+                            {formatScore(vectorScore)})*
+                            {formatScore(hybridAlpha)}
+                          </p>
                         </div>
                       </div>
+                    ) : (
+                      !!score && (
+                      <div className="w-full flex items-center text-xs text-white/60 gap-x-2 cursor-default">
+                        <div
+                          data-tooltip-id="similarity-score"
+                          data-tooltip-content={`This is the score of this chunk from ${searchType || "the vector database"}.`}
+                          className="flex items-center gap-x-1"
+                        >
+                          <Info size={14} />
+                          <p>
+                            {(searchType === "keyword" && "keyword") ||
+                            (searchType === "semantic" && "vector")
+                              ? `${searchType === "keyword" ? "keyword" : "vector"} `
+                              : ""}{searchType === "keyword"
+                              ? `keywordScore(${formatScore(score)})`
+                              : `${toPercentString(score)} match`}
+                          </p>
+                        </div>
+                      </div>
+                      )
                     )}
                   </div>
                 </div>
@@ -207,6 +289,86 @@ function CitationDetailModal({ source, onClose }) {
       </div>
     </ModalWrapper>
   );
+}
+
+function formatScore(value) {
+  if (!Number.isFinite(value)) return "0.00";
+  return Number(value).toFixed(2);
+}
+
+function renderChunksByType(chunks) {
+  if (!Array.isArray(chunks)) return [];
+  const keyword = chunks.filter((c) => c.searchType === "keyword");
+  const semantic = chunks.filter((c) => c.searchType === "semantic");
+  const other = chunks.filter(
+    (c) => c.searchType !== "semantic" && c.searchType !== "keyword"
+  );
+  return [...keyword, ...semantic, ...other];
+}
+
+function renderHighlightedText(text, matchedTerms) {
+  if (!Array.isArray(matchedTerms) || matchedTerms.length === 0) return text;
+  const matches = findTermMatches(text, matchedTerms);
+  if (matches.length === 0) return text;
+
+  const parts = [];
+  let lastIndex = 0;
+  matches.forEach((match, idx) => {
+    if (match.start > lastIndex) {
+      parts.push(text.slice(lastIndex, match.start));
+    }
+    parts.push(
+      <span key={`term-${idx}`} className="text-red-400 font-semibold">
+        {text.slice(match.start, match.end)}
+      </span>
+    );
+    lastIndex = match.end;
+  });
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
+
+function findTermMatches(text, matchedTerms) {
+  const matches = [];
+  const rawText = String(text);
+  const lowerText = rawText.toLowerCase();
+
+  const terms = Array.from(
+    new Set(
+      matchedTerms
+        .filter((t) => typeof t === "string" && t.trim().length > 0)
+        .map((t) => t.trim())
+    )
+  ).sort((a, b) => b.length - a.length);
+
+  for (const term of terms) {
+    const isAscii = /[A-Za-z]/.test(term);
+    const haystack = isAscii ? lowerText : rawText;
+    const needle = isAscii ? term.toLowerCase() : term;
+    let idx = 0;
+    while (idx < haystack.length) {
+      const found = haystack.indexOf(needle, idx);
+      if (found === -1) break;
+      matches.push({ start: found, end: found + needle.length });
+      idx = found + needle.length;
+    }
+  }
+
+  if (matches.length === 0) return matches;
+  matches.sort((a, b) => (a.start - b.start) || (b.end - b.start) - (a.end - a.start));
+
+  const merged = [];
+  for (const match of matches) {
+    const prev = merged[merged.length - 1];
+    if (!prev || match.start >= prev.end) {
+      merged.push(match);
+      continue;
+    }
+    if ((match.end - match.start) > (prev.end - prev.start)) {
+      merged[merged.length - 1] = match;
+    }
+  }
+  return merged;
 }
 
 const supportedSources = [

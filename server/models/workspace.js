@@ -30,6 +30,8 @@ function isNullOrNaN(value) {
  * @property {string} agentModel - The agent model of the workspace
  * @property {string} queryRefusalResponse - The query refusal response of the workspace
  * @property {string} vectorSearchMode - The vector search mode of the workspace
+ * @property {boolean} vectorSearchHybridEnabled - Whether hybrid search is enabled
+ * @property {number} vectorSearchHybridAlpha - The hybrid search alpha weight of the workspace
  */
 
 const Workspace = {
@@ -55,6 +57,8 @@ const Workspace = {
     "agentModel",
     "queryRefusalResponse",
     "vectorSearchMode",
+    "vectorSearchHybridEnabled",
+    "vectorSearchHybridAlpha",
   ],
 
   validations: {
@@ -121,13 +125,24 @@ const Workspace = {
       return String(value);
     },
     vectorSearchMode: (value) => {
-      if (
-        !value ||
-        typeof value !== "string" ||
-        !["default", "rerank"].includes(value)
-      )
+      if (!value || typeof value !== "string" || !["default", "rerank"].includes(value))
         return "default";
       return value;
+    },
+    vectorSearchHybridEnabled: (value) => {
+      if (value === null || value === undefined) return false;
+      if (typeof value === "boolean") return value;
+      if (typeof value === "string")
+        return value === "true" || value === "enabled";
+      return Boolean(value);
+    },
+    vectorSearchHybridAlpha: (value) => {
+      if (value === null || value === undefined) return 0.5;
+      const alpha = parseFloat(value);
+      if (isNullOrNaN(alpha)) return 0.5;
+      if (alpha < 0) return 0;
+      if (alpha > 1) return 1;
+      return alpha;
     },
   },
 
@@ -200,6 +215,12 @@ const Workspace = {
     if (!!defaultSystemPrompt?.value)
       additionalFields.openAiPrompt = defaultSystemPrompt.value;
     else additionalFields.openAiPrompt = this.defaultPrompt;
+    if (
+      additionalFields.vectorSearchHybridEnabled === undefined ||
+      additionalFields.vectorSearchHybridEnabled === null
+    ) {
+      additionalFields.vectorSearchHybridEnabled = true;
+    }
 
     try {
       const workspace = await prisma.workspaces.create({

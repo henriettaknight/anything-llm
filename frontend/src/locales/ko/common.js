@@ -328,11 +328,33 @@ const TRANSLATIONS = {
         "이 설정은 채팅 또는 쿼리당 LLM에 전송될 최대 문맥 조각 수를 제어합니다.",
       recommend: "추천: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores for PGVector workspaces.",
+      enable: "Enable",
+      disable: "Disable",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "문서 유사성 임계값",
       description:
         "채팅과 관련이 있다고 판단되는 문서의 유사성 점수입니다. 숫자가 높을수록 질문에 대한 문서의 내용이 유사합니다.",
       zero: "제한 없음",
+      hybrid: "하이브리드 전용(유사도 점수 ≥ .10)",
       low: "낮음 (유사성 점수 ≥ .25)",
       medium: "중간 (유사성 점수 ≥ .50)",
       high: "높음 (유사성 점수 ≥ .75)",

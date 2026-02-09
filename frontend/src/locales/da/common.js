@@ -250,11 +250,26 @@ const TRANSLATIONS = {
         "Denne indstilling styrer det maksimale antal kontekstuddrag, der vil blive sendt til LLM'en pr. chat eller forespørgsel.",
       recommend: "Anbefalet: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Tærskel for dokuments lighed",
       description:
         "Den minimale lighedsscore, der kræves for, at en kilde betragtes som relateret til chatten. Jo højere tallet er, desto mere lig skal kilden være chatten.",
       zero: "Ingen begrænsning",
+      hybrid: "Kun til hybrid (lighedsscore ≥ .10)",
       low: "Lav (lighedsscore ≥ 0,25)",
       medium: "Middel (lighedsscore ≥ 0,50)",
       high: "Høj (lighedsscore ≥ 0,75)",

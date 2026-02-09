@@ -12,6 +12,12 @@ export function castToType(key, value) {
     topN: {
       cast: (value) => Number(value),
     },
+    vectorSearchHybridAlpha: {
+      cast: (value) => parseFloat(value),
+    },
+    vectorSearchHybridEnabled: {
+      cast: (value) => value === "enabled" || value === true,
+    },
   };
 
   if (!definitions.hasOwnProperty(key)) return value;

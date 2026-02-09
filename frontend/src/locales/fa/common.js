@@ -240,11 +240,26 @@ const TRANSLATIONS = {
         "این تنظیم حداکثر تعداد قطعات متنی که برای هر گفتگو یا پرس‌وجو به LLM ارسال می‌شود را کنترل می‌کند.",
       recommend: "پیشنهادی: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "آستانه شباهت سند",
       description:
         "حداقل امتیاز شباهت مورد نیاز برای اینکه یک منبع مرتبط با گفتگو در نظر گرفته شود. هر چه عدد بالاتر باشد، منبع باید شباهت بیشتری با گفتگو داشته باشد.",
       zero: "بدون محدودیت",
+      hybrid: "فقط هیبرید (امتیاز شباهت ≥ .10)",
       low: "پایین (امتیاز شباهت ≥ .25)",
       medium: "متوسط (امتیاز شباهت ≥ .50)",
       high: "بالا (امتیاز شباهت ≥ .75)",

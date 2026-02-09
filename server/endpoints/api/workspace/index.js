@@ -980,6 +980,8 @@ function apiWorkspaceEndpoints(app) {
           similarityThreshold: parseSimilarityThreshold(),
           topN: parseTopN(),
           rerank: workspace?.vectorSearchMode === "rerank",
+          hybrid: workspace?.vectorSearchHybridEnabled,
+          hybridAlpha: workspace?.vectorSearchHybridAlpha,
         });
 
         response.status(200).json({

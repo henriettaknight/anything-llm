@@ -241,11 +241,26 @@ const TRANSLATIONS = {
         "This setting controls the maximum amount of context snippets that will be sent to the LLM for per chat or query.",
       recommend: "Recommended: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Document similarity threshold",
       description:
         "The minimum similarity score required for a source to be considered related to the chat. The higher the number, the more similar the source must be to the chat.",
       zero: "No restriction",
+      hybrid: "Chỉ hybrid (điểm tương đồng ≥ .10)",
       low: "Low (similarity score ≥ .25)",
       medium: "Medium (similarity score ≥ .50)",
       high: "High (similarity score ≥ .75)",

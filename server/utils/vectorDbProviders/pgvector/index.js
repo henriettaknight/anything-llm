@@ -3,6 +3,7 @@ const { toChunks, getEmbeddingEngineSelection } = require("../../helpers");
 const { TextSplitter } = require("../../TextSplitter");
 const { v4: uuidv4 } = require("uuid");
 const { sourceIdentifier } = require("../../chats");
+const { extractTerms } = require("../../helpers/termExtractor");
 
 /*
  Embedding Table Schema (table name defined by user)
@@ -53,6 +54,10 @@ const PGVector = {
 
   log: function (message = null, ...args) {
     console.log(`\x1b[35m[PGVectorDb]\x1b[0m ${message}`, ...args);
+  },
+  debugHybridLog: function (message = null, ...args) {
+    if (process.env.PGVECTOR_HYBRID_DEBUG !== "true") return;
+    console.log(`\x1b[36m[PGVectorHybrid]\x1b[0m ${message}`, ...args);
   },
 
   /**
@@ -368,9 +373,13 @@ const PGVector = {
     client,
     namespace,
     queryVector,
+    queryText = "",
     similarityThreshold = 0.25,
     topN = 4,
     filterIdentifiers = [],
+    hybrid = false,
+    hybridAlpha = null,
+    searchType = "semantic",
   }) {
     const result = {
       contextTexts: [],
@@ -379,13 +388,69 @@ const PGVector = {
     };
 
     const embedding = `[${queryVector.map(Number).join(",")}]`;
-    const response = await client.query(
-      `SELECT embedding ${this.operator.cosine} $1 AS _distance, metadata FROM "${PGVector.tableName()}" WHERE namespace = $2 ORDER BY _distance ASC LIMIT $3`,
-      [embedding, namespace, topN]
-    );
-    response.rows.forEach((item) => {
-      if (this.distanceToSimilarity(item._distance) < similarityThreshold)
-        return;
+    const alpha = this.getHybridAlpha(hybridAlpha);
+    if (hybrid) {
+      this.debugHybridLog("params", {
+        namespace,
+        topN,
+        similarityThreshold,
+        alpha,
+        queryTextPreview: String(queryText || "").slice(0, 120),
+      });
+    }
+    // Removed hybrid flag console log; use debugHybridLog with explicit flags instead.
+    const response = hybrid
+      ? await client.query(
+          `WITH ranked AS (
+            SELECT
+              embedding ${this.operator.cosine} $1 AS _distance,
+              ts_rank_cd(
+                to_tsvector('simple', COALESCE(metadata->>'text', '')),
+                plainto_tsquery('simple', COALESCE($2, ''))
+              ) AS _keyword_score,
+              metadata
+            FROM "${PGVector.tableName()}"
+            WHERE namespace = $3
+          )
+          SELECT
+            _distance,
+            _keyword_score,
+            ((1.0 - $4::float) * _keyword_score + $4::float * GREATEST(0, 1 - _distance)) AS _hybrid_score,
+            metadata
+          FROM ranked
+          ORDER BY _hybrid_score DESC
+          LIMIT $5`,
+          [embedding, queryText, namespace, alpha, topN]
+        )
+      : await client.query(
+          `SELECT embedding ${this.operator.cosine} $1 AS _distance, metadata FROM "${PGVector.tableName()}" WHERE namespace = $2 ORDER BY _distance ASC LIMIT $3`,
+          [embedding, namespace, topN]
+        );
+    response.rows.forEach((item, idx) => {
+      const vectorScore = this.distanceToSimilarity(item._distance);
+      const keywordScore = Number(item._keyword_score ?? 0);
+      const hybridScore = Number(item._hybrid_score ?? 0);
+      const score = hybrid ? hybridScore : vectorScore;
+      const passThreshold = hybrid
+        ? Math.max(vectorScore, keywordScore) >= similarityThreshold
+        : vectorScore >= similarityThreshold;
+      if (hybrid) {
+        this.debugHybridLog("score", {
+          index: idx,
+          vectorDistance: item._distance,
+          vectorScore,
+          keywordScore,
+          alpha,
+          hybridScore,
+          blended: `(1 - ${alpha})*${keywordScore} + ${alpha}*${Math.max(
+            0,
+            1 - item._distance
+          )}`,
+          passThreshold,
+          sourceId: sourceIdentifier(item.metadata),
+        });
+      }
+      if (!passThreshold) return;
       if (filterIdentifiers.includes(sourceIdentifier(item.metadata))) {
         this.log(
           "A source was filtered from context as it's parent document is pinned."
@@ -396,9 +461,83 @@ const PGVector = {
       result.contextTexts.push(item.metadata.text);
       result.sourceDocuments.push({
         ...item.metadata,
-        score: this.distanceToSimilarity(item._distance),
+        score,
+        ...(hybrid
+          ? {
+              vectorScore,
+              keywordScore,
+              hybridAlpha: alpha,
+            }
+          : {}),
+        searchType,
       });
-      result.scores.push(this.distanceToSimilarity(item._distance));
+      result.scores.push(score);
+    });
+
+    return result;
+  },
+  keywordResponse: async function ({
+    client,
+    namespace,
+    queryText = "",
+    similarityThreshold = 0.0,
+    topN = 4,
+    filterIdentifiers = [],
+    searchType = "keyword",
+  }) {
+    const result = {
+      contextTexts: [],
+      sourceDocuments: [],
+      scores: [],
+    };
+    if (!queryText) return result;
+
+    this.debugHybridLog("keyword:query", { queryText, namespace, topN });
+    const response = await client.query(
+      `WITH ranked AS (
+        SELECT
+          ts_rank_cd(
+            to_tsvector('simple', COALESCE(metadata->>'text', '')),
+            plainto_tsquery('simple', COALESCE($1, ''))
+          ) AS _keyword_score,
+          metadata
+        FROM "${PGVector.tableName()}"
+        WHERE namespace = $2
+      )
+      SELECT _keyword_score, metadata
+      FROM ranked
+      WHERE _keyword_score > 0
+      ORDER BY _keyword_score DESC
+      LIMIT $3`,
+      [queryText, namespace, topN]
+    );
+
+    response.rows.forEach((item) => {
+      const keywordScore = Number(item._keyword_score ?? 0);
+      if (keywordScore <= 0) return;
+      if (keywordScore < similarityThreshold) return;
+      if (filterIdentifiers.includes(sourceIdentifier(item.metadata))) {
+        this.log(
+          "A source was filtered from context as it's parent document is pinned."
+        );
+        return;
+      }
+      result.contextTexts.push(item.metadata.text);
+      result.sourceDocuments.push({
+        ...item.metadata,
+        score: keywordScore,
+        keywordScore,
+        searchType,
+      });
+      result.scores.push(keywordScore);
+    });
+
+    this.debugHybridLog("keyword:results", {
+      queryText,
+      count: result.sourceDocuments.length,
+      topScores: result.sourceDocuments
+        .slice(0, 3)
+        .map((doc) => doc.keywordScore || doc.score),
     });
 
     return result;
@@ -410,6 +549,20 @@ const PGVector = {
     );
     if (magnitude === 0) return vector; // Avoid division by zero
     return vector.map((val) => val / magnitude);
+  },
+
+  getHybridAlpha: function (alpha = null) {
+    const fallback = 0.5;
+    const raw =
+      alpha ??
+      process.env.PGVECTOR_HYBRID_ALPHA ??
+      process.env.VECTOR_HYBRID_ALPHA;
+    if (raw === null || raw === undefined || raw === "") return fallback;
+    const parsed = Number(raw);
+    if (Number.isNaN(parsed)) return fallback;
+    if (parsed < 0) return 0;
+    if (parsed > 1) return 1;
+    return parsed;
   },
 
   /**
@@ -710,6 +863,8 @@ const PGVector = {
     similarityThreshold = 0.25,
     topN = 4,
     filterIdentifiers = [],
+    hybrid = false,
+    hybridAlpha = null,
   }) {
     let connection = null;
     if (!namespace || !input || !LLMConnector)
@@ -729,17 +884,104 @@ const PGVector = {
         };
       }
 
+      this.debugHybridLog("semanticSearch", true);
       const queryVector = await LLMConnector.embedTextInput(input);
-      const result = await this.similarityResponse({
+      const alpha = this.getHybridAlpha(hybridAlpha);
+      const semanticResult = await this.similarityResponse({
         client: connection,
         namespace,
         queryVector,
+        queryText: "",
         similarityThreshold,
         topN,
         filterIdentifiers,
+        hybrid: false,
+        hybridAlpha,
+        searchType: "semantic",
       });
 
-      const { contextTexts, sourceDocuments } = result;
+      let { contextTexts, sourceDocuments } = semanticResult;
+
+      let terms = [];
+      if (hybrid) {
+        this.debugHybridLog("keywordSearch", true);
+        terms = extractTerms(input);
+        if (terms.length > 0) this.debugHybridLog("terms", terms);
+
+        const keywordDocs = [];
+        const keywordTexts = [];
+        const perTermLimit = Number(process.env.KEYWORD_TOPK_PER_TERM || 1);
+        for (const term of terms) {
+          const termResult = await this.keywordResponse({
+            client: connection,
+            namespace,
+            queryText: term,
+            similarityThreshold,
+            topN: perTermLimit,
+            filterIdentifiers,
+            searchType: "keyword",
+          });
+
+          termResult.sourceDocuments.forEach((doc, idx) => {
+            keywordDocs.push({
+              ...doc,
+              matchedTerms: [term],
+            });
+            keywordTexts.push(termResult.contextTexts[idx]);
+          });
+        }
+
+        const combinedKeyword = [];
+        const combinedKeywordTexts = [];
+        const keywordSeen = new Set();
+
+        keywordDocs
+          .map((doc, idx) => ({ doc, text: keywordTexts[idx] }))
+          .sort((a, b) => (b.doc.keywordScore || 0) - (a.doc.keywordScore || 0))
+          .forEach(({ doc, text }) => {
+            if (combinedKeyword.length >= topN) return;
+            const baseKey = doc?.id ? doc.id : sourceIdentifier(doc);
+            const termKey =
+              Array.isArray(doc?.matchedTerms) && doc.matchedTerms.length
+                ? doc.matchedTerms.join("|")
+                : "";
+            const key = termKey ? `${baseKey}::${termKey}` : baseKey;
+            if (keywordSeen.has(key)) return;
+            keywordSeen.add(key);
+            combinedKeyword.push(doc);
+            combinedKeywordTexts.push(text);
+          });
+
+        const fused = this.rrfFuseResults({
+          semanticDocs: sourceDocuments,
+          semanticTexts: contextTexts,
+          keywordDocs: combinedKeyword,
+          keywordTexts: combinedKeywordTexts,
+          weightSemantic: alpha,
+          weightKeyword: 1 - alpha,
+        });
+        sourceDocuments = fused.sourceDocuments;
+        contextTexts = fused.contextTexts;
+      }
+
+      if (terms.length > 0) {
+        sourceDocuments = sourceDocuments.map((doc, idx) => {
+          const text = contextTexts[idx] || "";
+          const matchedTerms = terms.filter((term) => {
+            if (!term) return false;
+            if (/[A-Za-z]/.test(term)) {
+              return text.toLowerCase().includes(term.toLowerCase());
+            }
+            return text.includes(term);
+          });
+          return {
+            ...doc,
+            matchedTerms,
+            queryTerms: terms,
+          };
+        });
+      }
+
       const sources = sourceDocuments.map((metadata, i) => {
         return { metadata: { ...metadata, text: contextTexts[i] } };
       });
@@ -749,10 +991,92 @@ const PGVector = {
         message: false,
       };
     } catch (err) {
-      return { error: err.message, success: false };
+      console.error("[PGVector] similarity search error:", err);
+      return {
+        contextTexts: [],
+        sources: [],
+        message: err.message || "PGVector similarity search failed.",
+      };
     } finally {
       if (connection) await connection.end();
     }
+  },
+  rrfFuseResults: function ({
+    semanticDocs = [],
+    semanticTexts = [],
+    keywordDocs = [],
+    keywordTexts = [],
+    weightSemantic = null,
+    weightKeyword = null,
+  }) {
+    const k = Number(process.env.RRF_K || 60);
+    const wSemantic =
+      weightSemantic !== null && weightSemantic !== undefined
+        ? Number(weightSemantic)
+        : Number(process.env.RRF_WEIGHT_SEMANTIC || 1);
+    const wKeyword =
+      weightKeyword !== null && weightKeyword !== undefined
+        ? Number(weightKeyword)
+        : Number(process.env.RRF_WEIGHT_KEYWORD || 1);
+
+    const items = new Map();
+    const addList = (docs, texts, weight, type) => {
+      docs.forEach((doc, idx) => {
+        const baseKey = doc?.id ? doc.id : sourceIdentifier(doc);
+        const termKey =
+          type === "keyword" &&
+          Array.isArray(doc?.matchedTerms) &&
+          doc.matchedTerms.length
+            ? doc.matchedTerms.join("|")
+            : "";
+        const key =
+          type === "semantic"
+            ? `${baseKey}::${idx}`
+            : termKey
+              ? `${baseKey}::${termKey}`
+              : baseKey;
+        const rank = idx + 1;
+        const score = weight / (k + rank);
+        const existing = items.get(key);
+        if (!existing) {
+          items.set(key, {
+            doc: { ...doc },
+            text: texts[idx],
+            rrfScore: score,
+            hasKeyword: type === "keyword",
+            hasSemantic: type === "semantic",
+          });
+        } else {
+          existing.rrfScore += score;
+          if (type === "keyword") {
+            existing.hasKeyword = true;
+            // Prefer keyword text when available
+            existing.text = texts[idx] || existing.text;
+            existing.doc = { ...existing.doc, ...doc };
+          } else {
+            existing.hasSemantic = true;
+          }
+        }
+      });
+    };
+
+    addList(semanticDocs, semanticTexts, wSemantic, "semantic");
+    addList(keywordDocs, keywordTexts, wKeyword, "keyword");
+
+    const fused = Array.from(items.values())
+      .sort((a, b) => b.rrfScore - a.rrfScore)
+      .map((item) => {
+        const searchType = item.hasKeyword ? "keyword" : "semantic";
+        return {
+          doc: { ...item.doc, searchType, rrfScore: item.rrfScore },
+          text: item.text,
+        };
+      });
+
+    return {
+      sourceDocuments: fused.map((item) => item.doc),
+      contextTexts: fused.map((item) => item.text),
+    };
   },
 
   "namespace-stats": async function (reqBody = {}) {

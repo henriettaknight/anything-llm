@@ -254,11 +254,26 @@ const TRANSLATIONS = {
         "Ce paramètre contrôle le nombre maximum de contextes qui seront envoyés au LLM par chat ou requête.",
       recommend: "Recommandé: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Seuil de similarité des documents",
       description:
         "Le score de similarité minimum requis pour qu'une source soit considérée comme liée au chat. Plus le nombre est élevé, plus la source doit être similaire au chat.",
       zero: "Aucune restriction",
+      hybrid: "Hybride uniquement (score de similarité ≥ .10)",
       low: "Bas (score de similarité ≥ .25)",
       medium: "Moyen (score de similarité ≥ .50)",
       high: "Élevé (score de similarité ≥ .75)",

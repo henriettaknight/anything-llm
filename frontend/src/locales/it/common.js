@@ -243,11 +243,26 @@ const TRANSLATIONS = {
         "Questa impostazione controlla la quantità massima di frammenti di contesto che verranno inviati all'LLM per ogni chat o query.",
       recommend: "Raccomandato: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Soglia di similarità del documento",
       description:
         "Punteggio di similarità minimo richiesto affinché una fonte sia considerata correlata alla chat. Più alto è il numero, più la fonte deve essere simile alla chat.",
       zero: "Nessuna restrizione",
+      hybrid: "Solo ibrido (punteggio di similarità ≥ .10)",
       low: "Basso (punteggio di similarità ≥ .25)",
       medium: "Medio (punteggio di similarità ≥ .50)",
       high: "Alto (punteggio di similarità ≥ .75)",

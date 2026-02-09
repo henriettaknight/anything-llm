@@ -239,11 +239,24 @@ const TRANSLATIONS = {
         "此設定控制每次對話或查詢時，將傳送至 LLM 的最大內容片段數量。",
       recommend: "建議值：4",
     },
+    hybridToggle: {
+      title: "混合搜尋",
+      description: "啟用混合搜尋以融合關鍵字與向量分數。",
+      enable: "啟用",
+      disable: "停用",
+      unsupported: "目前向量資料庫尚未支援混合搜尋。",
+    },
+    hybridAlpha: {
+      title: "混合搜尋 α 權重",
+      description:
+        "控制混合搜尋中關鍵字與向量檢索的權重（0 = 僅關鍵字，1 = 僅向量）。",
+    },
     doc: {
       title: "文件相似度門檻",
       description:
         "來源被視為與對話相關所需的最低相似度。數值越高，來源與對話的相似度就必須越高。",
       zero: "無限制",
+      hybrid: "僅混合（相似度 ≥ .10）",
       low: "低 (相似度 ≥ .25)",
       medium: "中 (相似度 ≥ .50)",
       high: "高 (相似度 ≥ .75)",

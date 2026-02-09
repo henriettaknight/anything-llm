@@ -338,11 +338,26 @@ const TRANSLATIONS = {
         "Diese Einstellung steuert die maximale Anzahl von Kontext-Snippets, die pro Chat oder Abfrage an das LLM gesendet werden.",
       recommend: "Empfohlen: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Dokumentähnlichkeitsschwelle",
       description:
         "Der minimale Ähnlichkeitswert, der erforderlich ist, damit eine Quelle als relevant für den Chat betrachtet wird. Je höher die Zahl, desto ähnlicher muss die Quelle dem Chat sein.",
       zero: "Keine Einschränkung",
+      hybrid: "Nur Hybrid (Ähnlichkeitswert ≥ .10)",
       low: "Niedrig (Ähnlichkeitswert ≥ .25)",
       medium: "Mittel (Ähnlichkeitswert ≥ .50)",
       high: "Hoch (Ähnlichkeitswert ≥ .75)",

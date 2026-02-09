@@ -338,11 +338,26 @@ const TRANSLATIONS = {
         "To ustawienie kontroluje maksymalną ilość fragmentów kontekstu, które zostaną wysłane do modelu językowego.",
       recommend: "Zalecane: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Próg podobieństwa dokumentów",
       description:
         "Minimalny wynik podobieństwa wymagany do uznania źródła za powiązane z czatem. Im wyższa liczba, tym bardziej źródło musi być powiązane z czatem.",
       zero: "Brak ograniczeń",
+      hybrid: "Tylko hybrydowy (wynik podobieństwa ≥ .10)",
       low: "Niski (wynik podobieństwa ≥ .25)",
       medium: "Średni (wynik podobieństwa ≥ .50)",
       high: "Wysoki (wynik podobieństwa ≥ .75)",

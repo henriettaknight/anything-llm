@@ -248,11 +248,26 @@ const TRANSLATIONS = {
         "この設定は、チャットやクエリごとにLLMへ送信される最大コンテキストスニペット数を制御します。",
       recommend: "推奨値: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "ドキュメント類似度しきい値",
       description:
         "チャットに関連すると見なされるために必要な最小類似度スコアです。数値が高いほど、より類似したソースのみが対象となります。",
       zero: "制限なし",
+      hybrid: "ハイブリッドのみ（類似度スコア ≥ .10）",
       low: "低（類似度スコア ≥ 0.25）",
       medium: "中（類似度スコア ≥ 0.50）",
       high: "高（類似度スコア ≥ 0.75）",

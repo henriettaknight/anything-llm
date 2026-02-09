@@ -326,11 +326,26 @@ const TRANSLATIONS = {
         "Maksimaalne lõikude arv, mis saadetakse LLM-ile ühe vestluse/päringu kohta.",
       recommend: "Soovitatav: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "Dokumendi sarnasuse lävi",
       description:
         "Minimaalne sarnasusskoor, et allikas oleks vestlusega seotud. Mida kõrgem, seda sarnasem peab allikas olema.",
       zero: "Piirang puudub",
+      hybrid: "Ainult hübriid (sarnasusskoor ≥ .10)",
       low: "Madal (≥ 0,25)",
       medium: "Keskmine (≥ 0,50)",
       high: "Kõrge (≥ 0,75)",

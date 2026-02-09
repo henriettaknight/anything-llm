@@ -249,11 +249,26 @@ const TRANSLATIONS = {
         "يتحكم هذا الإعداد في الحد الأقصى لعدد مقتطفات السياق التي سيتم إرسالها إلى نموذج التعلم العميق لكل محادثة أو استعلام.",
       recommend: "الموصى به: 4",
     },
+    hybridToggle: {
+      title: "Hybrid search",
+      description:
+        "Enable hybrid search to blend keyword and vector scores.",
+      enable: "Enable",
+      disable: "Disable",
+      unsupported:
+        "Your current vector database does not support hybrid search yet.",
+    },
+    hybridAlpha: {
+      title: "Hybrid RRF weight (semantic)",
+      description:
+        "Controls ranking weight between keyword and semantic results in hybrid mode (0 = keyword-only, 1 = semantic-only).",
+    },
     doc: {
       title: "عتبة تشابه المستند",
       description:
         "الحد الأدنى لدرجة التشابه المطلوبة لاعتبار المصدر مرتبطًا بالمحادثة. وكلما زاد الرقم، كلما كان المصدر أكثر تشابهًا بالمحادثة.",
       zero: "لا قيد",
+      hybrid: "مخصص للوضع المختلط فقط (درجة التشابه ≥ .10)",
       low: "منخفضة (درجة التشابه ≥ .25)",
       medium: "متوسطة ​​(درجة التشابه ≥ .50)",
       high: "عالية (درجة التشابه ≥ .75)",
