@@ -438,10 +438,10 @@ export default function MultiUserAuth() {
                   const keycloakUrl = import.meta.env.VITE_KEYCLOAK_URL;
                   const realm = import.meta.env.VITE_KEYCLOAK_REALM;
                   const clientId = import.meta.env.VITE_KEYCLOAK_CLIENT_ID;
-                  const redirectUri = encodeURIComponent(window.location.origin + '/login');
+                  const redirectUri = encodeURIComponent(window.location.origin + '/login/callback?registration=true');
                   
                   // Redirect to Keycloak registration page
-                  const registerUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/registrations?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}`;
+                  const registerUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/registrations?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&scope=openid`;
                   window.location.href = registerUrl;
                 }}
                 className="text-white text-sm flex gap-x-1 hover:text-primary-button hover:underline"
