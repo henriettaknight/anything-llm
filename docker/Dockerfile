@@ -143,6 +143,21 @@ WORKDIR /app/frontend
 COPY ./frontend/package.json ./frontend/yarn.lock ./
 RUN yarn install --network-timeout 100000 && yarn cache clean
 COPY ./frontend/ ./
+
+# Ensure prompts directory is included
+RUN mkdir -p /srv/share/snailLLM_Docker/prompts
+
+# Set Vite environment variables for build
+# These will be embedded into the frontend JavaScript during build
+ENV VITE_API_BASE=/api
+ENV VITE_KEYCLOAK_ENABLED=true
+ENV VITE_KEYCLOAK_URL=https://98.153.121.36
+ENV VITE_KEYCLOAK_REALM=anythingllm
+ENV VITE_KEYCLOAK_CLIENT_ID=anythingllm
+ENV VITE_AI_MODE=direct
+ENV VITE_DIRECT_AI_URL=http://vllm:8000
+ENV VITE_DIRECT_AI_MODEL=gpt-oss-20b
+
 RUN yarn build
 WORKDIR /app
 

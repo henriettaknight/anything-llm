@@ -278,7 +278,14 @@ ${content}
       const detectionPromise = (async () => {
         try {
           for await (const chunk of codeReviewAIService.streamChat(messageHistory)) {
-            responseContent += chunk;
+            // chunk is an object with {content, done, fullText}
+            if (chunk.content) {
+              responseContent += chunk.content;
+            }
+            // If stream is done, use fullText as final result
+            if (chunk.done && chunk.fullText) {
+              responseContent = chunk.fullText;
+            }
           }
           return responseContent;
         } catch (streamError) {

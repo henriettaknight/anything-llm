@@ -1,7 +1,6 @@
 import showToast from "@/utils/toast";
 import { DownloadSimple, Key } from "@phosphor-icons/react";
 import { saveAs } from "file-saver";
-import { useState } from "react";
 import ModalWrapper from "@/components/ModalWrapper";
 
 export default function RecoveryCodeModal({
@@ -9,19 +8,14 @@ export default function RecoveryCodeModal({
   onDownloadComplete,
   onClose,
 }) {
-  const [downloadClicked, setDownloadClicked] = useState(false);
-
   const downloadRecoveryCodes = () => {
     const blob = new Blob([recoveryCodes.join("\n")], { type: "text/plain" });
     saveAs(blob, "recovery_codes.txt");
-    setDownloadClicked(true);
   };
 
   const handleClose = () => {
-    if (downloadClicked) {
-      onDownloadComplete();
-      onClose();
-    }
+    onDownloadComplete();
+    onClose();
   };
 
   const handleCopyToClipboard = () => {
@@ -71,17 +65,18 @@ export default function RecoveryCodeModal({
           <div className="flex w-full justify-end items-center p-6 space-x-2 border-t border-theme-modal-border rounded-b">
             <button
               type="button"
-              className="transition-all duration-300 bg-white text-black hover:opacity-60 px-4 py-2 rounded-lg text-sm flex items-center gap-x-2"
-              onClick={downloadClicked ? handleClose : downloadRecoveryCodes}
+              className="transition-all duration-300 bg-gray-600 text-white hover:opacity-60 px-4 py-2 rounded-lg text-sm"
+              onClick={handleClose}
             >
-              {downloadClicked ? (
-                "Close"
-              ) : (
-                <>
-                  <DownloadSimple weight="bold" size={18} />
-                  <p>Download</p>
-                </>
-              )}
+              Skip
+            </button>
+            <button
+              type="button"
+              className="transition-all duration-300 bg-white text-black hover:opacity-60 px-4 py-2 rounded-lg text-sm flex items-center gap-x-2"
+              onClick={downloadRecoveryCodes}
+            >
+              <DownloadSimple weight="bold" size={18} />
+              <p>Download</p>
             </button>
           </div>
         </div>

@@ -89,21 +89,32 @@ export class DirectAIAdapter {
         console.log(`  [${idx}] role: ${msg.role}, content length: ${msg.content.length}`);
       });
       
-      const fullUrl = `${this.url}/v1/chat/completions`;
+      // Use backend proxy to avoid CORS and Mixed Content issues
+      const useProxy = window.location.protocol === 'https:' && this.url.startsWith('http://');
+      const fullUrl = useProxy 
+        ? '/api/direct-ai-proxy'
+        : `${this.url}/v1/chat/completions`;
+      
       console.log('\n🌐 Sending HTTP Request:');
       console.log('  - URL:', fullUrl);
+      console.log('  - Using proxy:', useProxy);
       console.log('  - Method: POST');
       console.log('  - Headers:', { 'Content-Type': 'application/json' });
       console.log('  - Body size:', JSON.stringify(requestBody).length, 'bytes');
       
       const requestStartTime = Date.now();
       
+      const requestPayload = useProxy ? {
+        url: `${this.url}/v1/chat/completions`,
+        body: requestBody
+      } : requestBody;
+      
       const response = await fetch(fullUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(requestPayload),
         signal: options.signal
       });
 
@@ -142,6 +153,13 @@ export class DirectAIAdapter {
             console.log('  - First 500 chars of response:', totalContent.substring(0, 500));
             console.log('  - Last 200 chars of response:', totalContent.substring(totalContent.length - 200));
             console.log('='.repeat(80) + '\n');
+            
+            // Yield final result
+            yield {
+              content: '',
+              done: true,
+              fullText: totalContent
+            };
             break;
           }
 
@@ -155,6 +173,12 @@ export class DirectAIAdapter {
             const data = line.slice(6);
             if (data === '[DONE]') {
               console.log('\n✓ Received [DONE] signal');
+              // Yield final result before returning
+              yield {
+                content: '',
+                done: true,
+                fullText: totalContent
+              };
               return;
             }
 
@@ -176,7 +200,12 @@ export class DirectAIAdapter {
                   console.log(`  📊 Progress: ${chunkCount} chunks, ${totalContent.length} chars`);
                 }
                 
-                yield content;
+                // Yield in the same format as AIAdapter
+                yield {
+                  content,
+                  done: false,
+                  fullText: totalContent
+                };
               }
             } catch (e) {
               console.warn('⚠️ Failed to parse chunk:', e, 'Line:', line);
@@ -269,18 +298,9 @@ export class DualModeAIAdapter {
    * Switch AI mode at runtime (for testing)
    * 
    * @param {string} newMode - New mode ('direct' or 'llm')
-   * @throws {Error} If trying to switch to direct mode in production
+   * @throws {Error} If invalid mode
    */
   switchMode(newMode) {
-    // Safety check: prevent switching to direct mode in production
-    if (newMode === AI_MODES.DIRECT && import.meta.env.PROD) {
-      throw new Error('Cannot switch to direct mode in production environment');
-    }
-
-    if (newMode === AI_MODES.DIRECT && !import.meta.env.DEV) {
-      throw new Error('Direct mode is only available in development environment');
-    }
-
     if (newMode !== AI_MODES.DIRECT && newMode !== AI_MODES.LLM) {
       throw new Error(`Invalid AI mode: ${newMode}`);
     }
