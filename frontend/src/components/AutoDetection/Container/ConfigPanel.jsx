@@ -7,6 +7,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
   const [formData, setFormData] = useState({
     directory: config?.directory || "",
     detectionTime: config?.detectionTime || "",
+    projectType: config?.projectType || "", // 空字符串表示未选择
   });
   const [errors, setErrors] = useState({});
   const [successMessage, setSuccessMessage] = useState("");
@@ -29,6 +30,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
       setFormData({
         directory: config.directory || "",
         detectionTime: config.detectionTime || "",
+        projectType: config.projectType || "",
       });
     }
   }, [config]);
@@ -143,6 +145,13 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
       );
     }
 
+    if (!formData.projectType) {
+      newErrors.projectType = t(
+        "autodetection.config.error.projectTypeRequired",
+        "Please select a project type"
+      );
+    }
+
     if (!formData.detectionTime) {
       newErrors.detectionTime = t(
         "autodetection.config.error.timeRequired",
@@ -169,15 +178,22 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
     const result = await onSave({
       directory: formData.directory,
       detectionTime: formData.detectionTime,
+      projectType: formData.projectType,
       enabled: true,
-      fileTypes: ['.h', '.cpp', '.c', '.hpp', '.cc'],
+      fileTypes: ['.h', '.cpp', '.c', '.hpp', '.cc'], // 所有 UE5 项目都检测 C++ 文件
       excludePatterns: [
         '**/node_modules/**',
         '**/build/**',
         '**/dist/**',
         '**/.git/**',
         '**/temp/**',
-        '**/tmp/**'
+        '**/tmp/**',
+        ...(formData.projectType === 'ue_blueprint' ? [
+          '**/Developers/**',
+          '**/Collections/**',
+          '**/__ExternalActors__/**',
+          '**/__ExternalObjects__/**'
+        ] : [])
       ],
       batchSize: 10,
       retryAttempts: 3,
@@ -276,6 +292,44 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
           )}
         </div>
 
+        {/* Project Type Selection */}
+        <div>
+          <label className="block text-sm font-medium text-theme-text-primary mb-2">
+            {t("autodetection.config.projectType", "Project Type")}
+            <span className="text-red-500 ml-1">*</span>
+          </label>
+          <select
+            value={formData.projectType}
+            onChange={(e) => {
+              setFormData(prev => ({ ...prev, projectType: e.target.value }));
+              if (errors.projectType) {
+                setErrors(prev => ({ ...prev, projectType: "" }));
+              }
+            }}
+            disabled={isSaving}
+            className="w-full px-3 py-2 bg-theme-bg-primary border border-theme-sidebar-border rounded text-theme-text-primary focus:outline-none focus:ring-2 focus:ring-theme-accent-primary disabled:opacity-50"
+          >
+            <option value="">
+              {t("autodetection.config.projectTypePlaceholder", "-- Please select project type --")}
+            </option>
+            <option value="ue_cpp">
+              {t("autodetection.config.projectType.ueCpp", "UE5 C++ Project")}
+            </option>
+            <option value="ue_blueprint">
+              {t("autodetection.config.projectType.ueBlueprint", "UE5 Blueprint Project")}
+            </option>
+          </select>
+          {errors.projectType && (
+            <p className="mt-1 text-sm text-red-600">{errors.projectType}</p>
+          )}
+          <p className="mt-1 text-xs text-theme-text-secondary">
+            {t(
+              "autodetection.config.projectTypeHint",
+              "Select the type of project to use the appropriate detection rules"
+            )}
+          </p>
+        </div>
+
         {/* Time Input */}
         <div>
           <label className="block text-sm font-medium text-theme-text-primary mb-2">
@@ -328,33 +382,6 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
             ? t("autodetection.config.saving", "Saving...")
             : t("autodetection.config.saveButton", "Save Configuration")}
         </button>
-      </div>
-
-      {/* Info Box */}
-      <div className="mt-6 p-3 bg-theme-bg-primary border border-theme-sidebar-border rounded text-sm text-theme-text-secondary">
-        <p className="font-semibold mb-2">
-          {t("autodetection.config.info", "How it works")}
-        </p>
-        <ul className="list-disc list-inside space-y-1 text-xs">
-          <li>
-            {t(
-              "autodetection.config.infoStep1",
-              "Select a directory containing C++ source files"
-            )}
-          </li>
-          <li>
-            {t(
-              "autodetection.config.infoStep2",
-              "Set the time when detection should run daily"
-            )}
-          </li>
-          <li>
-            {t(
-              "autodetection.config.infoStep3",
-              "System will automatically scan and analyze files at the specified time"
-            )}
-          </li>
-        </ul>
       </div>
     </div>
   );

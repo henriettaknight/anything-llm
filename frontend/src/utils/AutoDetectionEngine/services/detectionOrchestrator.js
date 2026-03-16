@@ -34,7 +34,22 @@ class DetectionOrchestratorImpl {
     this.batchProcessor = null;
     this.progressCallbacks = [];
     this.statusCallbacks = [];
-    this.isCancelled = false;  // 添加取消标志
+    this._isCancelled = false;  // 使用私有变量
+    
+    // 🔍 调试：使用 getter/setter 监控 isCancelled 的变化
+    Object.defineProperty(this, 'isCancelled', {
+      get: () => {
+        return this._isCancelled;
+      },
+      set: (value) => {
+        if (this._isCancelled !== value) {
+          console.log('🚨🚨🚨 isCancelled 标志变化:', this._isCancelled, '→', value);
+          console.log('变化时间:', new Date().toISOString());
+          console.trace('变化调用栈:');
+        }
+        this._isCancelled = value;
+      }
+    });
   }
 
   /**
@@ -53,12 +68,18 @@ class DetectionOrchestratorImpl {
     const { directoryHandle, config, onProgress, onStatusChange, onReportGenerated, resumeFromLast = false } = options;
 
     // Force cleanup any existing session state
+    console.log('🧹 强制清理会话状态');
+    console.trace('调用栈:');
+    console.log('清理前 isCancelled:', this.isCancelled);
+    
     this.currentSession = null;
     this.progressCallbacks = [];
     this.statusCallbacks = [];
     this.reportCallbacks = [];
     this.isCancelled = false;  // 重置取消标志
+    
     console.log('✅ Session state forcefully cleared');
+    console.log('清理后 isCancelled:', this.isCancelled);
 
     // Check if we should resume from last session
     if (resumeFromLast) {
@@ -171,8 +192,12 @@ class DetectionOrchestratorImpl {
       // Process groups
       for (let i = 0; i < groups.length; i++) {
         // 检查是否已取消
+        console.log(`🔍 检查取消标志 (分组 ${i + 1}/${groups.length}): isCancelled = ${this.isCancelled}`);
         if (this.isCancelled) {
-          console.log('检测已被取消，停止处理');
+          console.log('❌ 检测已被取消，停止处理');
+          console.log('取消时间:', new Date().toISOString());
+          console.log('当前分组:', groups[i].name);
+          console.trace('取消检测点的调用栈:');
           throw new Error('检测已被用户取消');
         }
         
@@ -374,6 +399,9 @@ class DetectionOrchestratorImpl {
       async (file) => {
         // 检查是否已取消
         if (this.isCancelled) {
+          console.log('❌ 文件处理时检测到取消标志');
+          console.log('文件:', file.path);
+          console.log('取消时间:', new Date().toISOString());
           throw new Error('检测已被用户取消');
         }
         
@@ -387,7 +415,13 @@ class DetectionOrchestratorImpl {
         // Detect defects in file
         let defects = [];
         try {
-          defects = await detectDefectsInFile(file, directoryHandle);
+          // Get projectType from config
+          const projectType = this.currentSession.config.projectType;
+          if (!projectType) {
+            throw new Error('Project type is required for detection');
+          }
+          
+          defects = await detectDefectsInFile(file, directoryHandle, projectType);
           
           // Track processed file
           SessionStorage.addProcessedFile(this.currentSession.id, {
@@ -475,13 +509,20 @@ class DetectionOrchestratorImpl {
    * @returns {Promise<void>}
    */
   async cancelDetection() {
+    // 🔍 调试：记录调用栈
+    console.log('🛑🛑🛑 detectionOrchestrator.cancelDetection() 被调用');
+    console.trace('调用栈:');
+    console.log('当前时间:', new Date().toISOString());
+    console.log('当前会话:', this.currentSession?.id);
+    console.log('isCancelled 当前值:', this.isCancelled);
+    
     if (!this.currentSession) {
       throw new Error('没有活动的检测会话');
     }
 
     // 设置取消标志
     this.isCancelled = true;
-    console.log('设置取消标志，检测将在下一个检查点停止');
+    console.log('✅ 设置取消标志为 true，检测将在下一个检查点停止');
 
     SessionStorage.updateStatus(this.currentSession.id, SessionStatus.CANCELLED);
     this.currentSession = SessionStorage.load(this.currentSession.id);

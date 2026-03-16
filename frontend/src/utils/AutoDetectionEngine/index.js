@@ -226,6 +226,11 @@ class AutoDetectionEngine {
    * @returns {Promise<Object>} Result with success status
    */
   async stopDetection() {
+    // 🔍 调试：记录调用栈
+    console.log('🛑🛑🛑 AutoDetectionEngine.stopDetection() 被调用');
+    console.trace('调用栈:');
+    console.log('当前时间:', new Date().toISOString());
+    
     if (!this.initialized) {
       throw new Error('Engine not initialized');
     }

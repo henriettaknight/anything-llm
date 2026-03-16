@@ -66,30 +66,35 @@ export const initializeServices = (aiService, logService) => {
 };
 
 /**
- * Get UE C++ static defect detection system prompt
+ * Get UE static defect detection system prompt
+ * @param {string} projectType - Project type ('ue_cpp' or 'ue_blueprint')
  * @returns {Promise<string>} - System prompt
  */
-async function getUEDefectDetectionPrompt() {
+async function getUEDefectDetectionPrompt(projectType) {
+  // Validate projectType
+  if (!projectType || !['ue_cpp', 'ue_blueprint'].includes(projectType)) {
+    throw new Error(`Invalid project type: ${projectType}. Must be 'ue_cpp' or 'ue_blueprint'`);
+  }
+
   try {
-    serverLog?.info('📝 尝试从 API 获取提示词...');
-    const response = await fetch('/api/prompts/ue-static-defect');
+    serverLog?.info(`📝 尝试从 API 获取提示词... 项目类型: ${projectType}`);
+    const response = await fetch(`/api/prompts/ue-static-defect?type=${projectType}`);
     
     if (response.ok) {
       const prompt = await response.text();
+      const promptFile = projectType === 'ue_cpp' ? 'ue5_cpp_prompt.md' : 'ue5_blueprint_prompt.md';
       serverLog?.info(`✓ 成功从 API 获取提示词，长度: ${prompt.length} 字符`);
-      serverLog?.info(`✓ 提示词来源: ue5_cpp_prompt.md 文件`);
+      serverLog?.info(`✓ 提示词来源: ${promptFile} 文件`);
       return prompt;
     } else {
       const errorData = await response.json().catch(() => ({}));
       serverLog?.warn(`⚠ API 返回错误状态 ${response.status}:`, errorData);
+      throw new Error(`Failed to fetch prompt: ${response.status}`);
     }
   } catch (error) {
     serverLog?.error('❌ 从 API 获取提示词失败:', error);
+    throw error;
   }
-  
-  // Fallback to hardcoded default prompt
-  serverLog?.warn('⚠ 使用硬编码的默认提示词（备用方案）');
-  return getEnhancedDefaultPrompt();
 }
 
 /**
@@ -183,10 +188,16 @@ async function findPairedImplementationFile(headerFile, directoryHandle) {
  * Detect defects in a single file
  * @param {Object} fileInfo - File information
  * @param {FileSystemDirectoryHandle} [directoryHandle] - Directory handle
+ * @param {string} projectType - Project type ('ue_cpp' or 'ue_blueprint')
  * @returns {Promise<DefectDetectionResult[]>} - List of detected defects
  */
-export async function detectDefectsInFile(fileInfo, directoryHandle) {
-  serverLog?.info(`=== 开始检测文件: ${fileInfo.name} ===`);
+export async function detectDefectsInFile(fileInfo, directoryHandle, projectType) {
+  // Validate required parameters
+  if (!projectType) {
+    throw new Error('Project type is required for detection');
+  }
+
+  serverLog?.info(`=== 开始检测文件: ${fileInfo.name} (项目类型: ${projectType}) ===`);
   
   try {
     // Get file content
@@ -197,14 +208,14 @@ export async function detectDefectsInFile(fileInfo, directoryHandle) {
     }
     serverLog?.info(`文件内容长度: ${content.length} 字符`);
 
-    // If it's a .h file, try to find corresponding .cpp file
+    // If it's a .h file, try to find corresponding .cpp file (only for C++ projects)
     let pairedFile = null;
-    if (fileInfo.name.endsWith('.h') && directoryHandle) {
+    if (projectType === 'ue_cpp' && fileInfo.name.endsWith('.h') && directoryHandle) {
       pairedFile = await findPairedImplementationFile(fileInfo, directoryHandle);
     }
 
-    // Get system prompt
-    const systemPrompt = await getUEDefectDetectionPrompt();
+    // Get system prompt (must pass projectType)
+    const systemPrompt = await getUEDefectDetectionPrompt(projectType);
     serverLog?.info(`提示词长度: ${systemPrompt.length} 字符`);
     
     // Build user message
@@ -268,6 +279,7 @@ ${content}
 
     // Add timeout mechanism (5 minutes)
     const timeout = 300000; // 300 seconds
+    const startTime = Date.now(); // 🔍 记录开始时间
     let responseContent = '';
     let abortController = null;
     let timeoutId = null;
@@ -278,6 +290,12 @@ ${content}
       const detectionPromise = (async () => {
         try {
           for await (const chunk of codeReviewAIService.streamChat(messageHistory)) {
+            // 🔍 定期检查耗时
+            const elapsed = Date.now() - startTime;
+            if (elapsed > 30000 && elapsed % 10000 < 100) { // 每10秒记录一次（超过30秒后）
+              console.log(`⏱️ AI 响应进行中: ${Math.floor(elapsed / 1000)}秒, 已接收 ${responseContent.length} 字符`);
+            }
+            
             // chunk is an object with {content, done, fullText}
             if (chunk.content) {
               responseContent += chunk.content;
@@ -287,6 +305,10 @@ ${content}
               responseContent = chunk.fullText;
             }
           }
+          
+          const totalTime = Date.now() - startTime;
+          console.log(`✅ AI 响应完成，总耗时: ${Math.floor(totalTime / 1000)}秒`);
+          
           return responseContent;
         } catch (streamError) {
           // Stream aborted or error
@@ -742,16 +764,23 @@ function parseLooseFormatDefects(response, filePath) {
  * @param {Object[]} files - Files to analyze
  * @param {FileSystemDirectoryHandle} [directoryHandle] - Directory handle
  * @param {Function} [onProgress] - Progress callback
+ * @param {string} projectType - Project type ('ue_cpp' or 'ue_blueprint')
  * @returns {Promise<CodeDetectionReport>} - Detection report
  */
-export async function detectDefectsInFiles(files, directoryHandle, onProgress) {
+export async function detectDefectsInFiles(files, directoryHandle, onProgress, projectType) {
+  // Validate required parameters
+  if (!projectType) {
+    throw new Error('Project type is required for batch detection');
+  }
+
   const report = {
     id: generateReportId(),
     timestamp: Date.now(),
     filesScanned: files.length,
     defectsFound: 0,
     defects: [],
-    summary: {
+    projectType: projectType,
+    summary: projectType === 'ue_cpp' ? {
       auto: 0,
       array: 0,
       memf: 0,
@@ -761,10 +790,25 @@ export async function detectDefectsInFiles(files, directoryHandle, onProgress) {
       depr: 0,
       perf: 0,
       class: 0
+    } : {
+      null: 0,
+      tick: 0,
+      loop: 0,
+      array: 0,
+      event: 0,
+      cast: 0,
+      ref: 0,
+      replicate: 0,
+      interface: 0,
+      resource: 0,
+      init: 0,
+      anim: 0,
+      ui: 0,
+      compile: 0
     }
   };
 
-  serverLog?.info(`开始检测 ${files.length} 个文件的缺陷...`);
+  serverLog?.info(`开始检测 ${files.length} 个文件的缺陷... (项目类型: ${projectType})`);
   
   // Batch detection to avoid sending too many requests at once
   const batchSize = 3; // Detect 3 files at a time
@@ -782,7 +826,7 @@ export async function detectDefectsInFiles(files, directoryHandle, onProgress) {
         }
         
         serverLog?.info(`  开始检测文件 ${i + batch.indexOf(file) + 1}/${files.length}: ${file.name}`);
-        const result = await detectDefectsInFile(file, directoryHandle);
+        const result = await detectDefectsInFile(file, directoryHandle, projectType);
         serverLog?.info(`  完成检测文件 ${i + batch.indexOf(file) + 1}/${files.length}: ${file.name}，发现 ${result.length} 个缺陷`);
         return result;
       } catch (error) {

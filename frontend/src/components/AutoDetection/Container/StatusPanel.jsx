@@ -193,7 +193,7 @@ export default function StatusPanel({ status, onStart, onStop }) {
           {status.status !== "running" && status.status !== "waiting" ? (
             <button
               onClick={handleStart}
-              disabled={isStarting || status.status === "error"}
+              disabled={isStarting}
               className="flex-1 px-4 py-2 bg-gray-50 text-gray-800 rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-gray-200"
             >
               {isStarting

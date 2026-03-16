@@ -124,9 +124,10 @@ class DetectionService {
         options: options
       };
 
-      // Update status
+      // Update status with config
       this.updateStatus({
         status: 'running',
+        config: options, // Save config to status
         progress: {
           completed: 0,
           total: 0,
@@ -201,12 +202,18 @@ class DetectionService {
       const config = this.currentStatus.config || {
         targetDirectory: '',
         detectionTime: '09:00',
+        projectType: '', // Add projectType
         enabled: true,
         fileTypes: ['.h', '.cpp', '.c', '.hpp', '.cc'],
         excludePatterns: ['**/node_modules/**', '**/build/**', '**/dist/**', '**/.git/**'],
         batchSize: 10,
         retryAttempts: 3
       };
+
+      // Validate projectType
+      if (!config.projectType) {
+        throw new Error('Project type is required for detection');
+      }
 
       console.log('Starting real detection with config:', config);
 
@@ -248,8 +255,12 @@ class DetectionService {
 
       if (!result.success) {
         // 检查是否是用户取消
+        console.log('🔍 检测失败，错误信息:', result.error);
+        console.log('🔍 是否包含"取消":', result.error?.includes('取消'));
+        console.log('🔍 失败时间:', new Date().toISOString());
+        
         if (result.error && result.error.includes('取消')) {
-          console.log('检测被用户取消');
+          console.log('✅ 确认为用户取消，设置状态为 idle');
           this.updateStatus({
             status: 'idle',
             error: null
@@ -257,6 +268,7 @@ class DetectionService {
           return;
         }
         
+        console.log('❌ 非用户取消的错误，设置错误状态');
         this.setError(result.error || 'Detection failed');
       } else {
         // Extract results from the returned session
@@ -346,12 +358,19 @@ class DetectionService {
    */
   async stop() {
     try {
+      // 🔍 调试：记录调用栈
+      console.log('🛑🛑🛑 detectionService.stop() 被调用');
+      console.trace('调用栈:');
+      console.log('当前时间:', new Date().toISOString());
+      console.log('当前状态:', this.currentStatus?.status);
+      
       if (!this.isInitialized) {
         await this.initialize();
       }
 
       // Check if running
       if (this.currentStatus.status !== 'running') {
+        console.log('⚠️ 检测未在运行，当前状态:', this.currentStatus.status);
         return {
           success: false,
           error: 'No detection is currently running'
@@ -551,6 +570,15 @@ class DetectionService {
    */
   updateStatus(statusUpdate) {
     const oldStatus = { ...this.currentStatus };
+    
+    // 🔍 调试：记录状态变化
+    if (oldStatus.status !== statusUpdate.status) {
+      console.log('📊📊📊 detectionService 状态变化:');
+      console.log('  旧状态:', oldStatus.status);
+      console.log('  新状态:', statusUpdate.status);
+      console.log('  时间:', new Date().toISOString());
+      console.trace('  调用栈:');
+    }
     
     this.currentStatus = {
       ...this.currentStatus,

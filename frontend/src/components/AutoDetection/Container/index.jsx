@@ -12,6 +12,7 @@ export default function AutoDetectionContainer() {
   const [config, setConfig] = useState({
     directory: "",
     detectionTime: "",
+    projectType: "",
     enabled: false,
   });
   const [status, setStatus] = useState({
@@ -109,6 +110,7 @@ export default function AutoDetectionContainer() {
       setConfig({
         directory: config.targetDirectory || "",
         detectionTime: config.detectionTime || "",
+        projectType: config.projectType || "",
         enabled: config.enabled || false,
       });
     } catch (error) {
@@ -127,6 +129,13 @@ export default function AutoDetectionContainer() {
           error: null,
         };
         
+        // 🔍 调试：记录状态轮询
+        console.log('🔄 状态轮询结果:', {
+          时间: new Date().toISOString(),
+          新状态: newStatus.status,
+          进度: newStatus.progress
+        });
+        
         // Only update if status actually changed or if still running
         setStatus(prevStatus => {
           // If previous status was completed/error and new status is the same, don't update
@@ -139,6 +148,8 @@ export default function AutoDetectionContainer() {
           // Log status changes
           if (prevStatus.status !== newStatus.status) {
             console.log(`📊 Status changed: ${prevStatus.status} → ${newStatus.status}`);
+            console.log('📊 状态变更时间:', new Date().toISOString());
+            console.trace('状态变更调用栈:');
           }
           
           return newStatus;
@@ -241,6 +252,7 @@ export default function AutoDetectionContainer() {
       const result = await configService.saveConfig({
         targetDirectory: newConfig.directory || "",
         detectionTime: newConfig.detectionTime || "",
+        projectType: newConfig.projectType || "",
         enabled: newConfig.enabled || false,
         fileTypes: newConfig.fileTypes || ['.h', '.cpp', '.c', '.hpp', '.cc'],
         excludePatterns: newConfig.excludePatterns || [
@@ -289,6 +301,17 @@ export default function AutoDetectionContainer() {
 
   const startDetection = async () => {
     try {
+      // Validate project type before starting
+      if (!config.projectType) {
+        const errorMsg = "Please select a project type before starting detection";
+        setStatus((prev) => ({
+          ...prev,
+          status: "error",
+          error: errorMsg,
+        }));
+        return { success: false, error: errorMsg };
+      }
+
       // Reset status if previous detection is completed or waiting
       if (status.status === "completed" || status.status === "waiting") {
         setReportCreated(false); // 重置报告创建标志
@@ -358,7 +381,11 @@ export default function AutoDetectionContainer() {
         await handleGroupReportGenerated(groupReport);
       });
 
-      const result = await AutoDetectionAPI.start();
+      // Load full config from configService
+      const fullConfig = await configService.getConfig();
+      console.log('Starting detection with config:', fullConfig);
+
+      const result = await AutoDetectionAPI.start(fullConfig);
       if (result.success) {
         setStatus((prev) => ({
           ...prev,

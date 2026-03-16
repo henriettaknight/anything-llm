@@ -49,9 +49,9 @@ const AutoDetectionAPI = {
   },
 
   // Start detection
-  start: async () => {
+  start: async (config) => {
     try {
-      const result = await detectionService.start();
+      const result = await detectionService.start(config);
       return result;
     } catch (error) {
       console.error("Error starting detection:", error);
