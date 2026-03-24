@@ -19,6 +19,8 @@ export function detectUserLanguage() {
     // Simplify language code (zh-CN → zh, en-US → en)
     const simplifiedLang = language.split('-')[0].toLowerCase();
     
+    console.log(`🌐 [Language Detection] i18n.language: ${language}, simplified: ${simplifiedLang}`);
+    
     return simplifiedLang;
   } catch (error) {
     console.error('Error detecting user language:', error);

@@ -12,6 +12,7 @@ const AutoDetectionAPI = {
         config: {
           directory: config.targetDirectory || "",
           detectionTime: config.detectionTime || "",
+          projectType: config.projectType || "ue_cpp", // 🔧 添加 projectType
           enabled: config.enabled || false,
         },
       };
@@ -27,6 +28,7 @@ const AutoDetectionAPI = {
       const result = await configService.saveConfig({
         targetDirectory: config.directory || "",
         detectionTime: config.detectionTime || "",
+        projectType: config.projectType || "ue_cpp", // 🔧 添加 projectType
         enabled: config.enabled || false,
         fileTypes: config.fileTypes || ['.h', '.cpp', '.c', '.hpp', '.cc'],
         excludePatterns: config.excludePatterns || [

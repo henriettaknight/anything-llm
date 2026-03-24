@@ -258,7 +258,7 @@ class FileSystemStorage {
   async requestDirectoryAccess(id = 'targetDirectory') {
     try {
       // Check if File System Access API is supported
-      if (!('showDirectoryPicker' in window)) {
+      if (typeof window.showDirectoryPicker !== "function") {
         throw new Error('File System Access API not supported');
       }
 
@@ -317,9 +317,10 @@ class FileSystemStorage {
    * @returns {boolean} Support status
    */
   static isSupported() {
-    return 'showDirectoryPicker' in window && 
-           'showOpenFilePicker' in window &&
-           'indexedDB' in window;
+    return typeof window !== "undefined" &&
+           typeof window.showDirectoryPicker === "function" && 
+           typeof window.showOpenFilePicker === "function" &&
+           typeof window.indexedDB !== "undefined";
   }
 
   /**

@@ -15,6 +15,7 @@ const DEFAULT_CONFIG = {
   enabled: false,
   targetDirectory: '',
   detectionTime: '09:00',
+  projectType: 'ue_cpp', // 🔧 添加 projectType 默认值
   fileTypes: ['.h', '.cpp', '.c', '.hpp', '.cc'],
   excludePatterns: [
     '**/node_modules/**',
@@ -113,6 +114,7 @@ class ConfigStorage {
       'enabled',
       'targetDirectory',
       'detectionTime',
+      'projectType', // 🔧 添加 projectType 验证
       'fileTypes',
       'excludePatterns',
       'batchSize',
@@ -140,6 +142,12 @@ class ConfigStorage {
 
     if (typeof config.detectionTime !== 'string' || !this.validateTimeFormat(config.detectionTime)) {
       console.warn('detectionTime must be valid time string (HH:MM)');
+      return false;
+    }
+
+    // 🔧 添加 projectType 验证
+    if (typeof config.projectType !== 'string' || !['ue_cpp', 'ue_blueprint'].includes(config.projectType)) {
+      console.warn('projectType must be either "ue_cpp" or "ue_blueprint"');
       return false;
     }
 

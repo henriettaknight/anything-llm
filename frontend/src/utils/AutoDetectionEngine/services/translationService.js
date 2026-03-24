@@ -114,6 +114,14 @@ export class HybridTranslationService {
       translated.suggestedFix = await this.translateText(translated.suggestedFix, targetLang);
     }
 
+    // Final safety check: ensure all translated fields are strings
+    ['category', 'risk', 'confidence', 'howToTrigger', 'suggestedFix'].forEach(field => {
+      if (translated[field] && typeof translated[field] === 'object') {
+        console.error(`❌ translateDefect: Field ${field} is still an object after translation:`, translated[field]);
+        translated[field] = translated[field].en || translated[field].zh || String(translated[field]);
+      }
+    });
+
     return translated;
   }
 
@@ -182,11 +190,19 @@ export class HybridTranslationService {
 
     const mapping = this.staticMappings.categories[category];
     if (mapping && mapping[targetLang]) {
-      return mapping[targetLang];
+      const result = mapping[targetLang];
+      // Ensure we return a string, not an object
+      if (typeof result === 'string') {
+        return result;
+      } else if (typeof result === 'object' && result !== null) {
+        console.warn(`⚠️ translateCategory: Expected string but got object for ${category}[${targetLang}]:`, result);
+        // Try to extract a reasonable string representation
+        return result.en || result.zh || String(result);
+      }
     }
 
     // If no mapping found, return original
-    return category;
+    return String(category);
   }
 
   /**
@@ -202,11 +218,19 @@ export class HybridTranslationService {
 
     const mapping = this.staticMappings.risks[risk];
     if (mapping && mapping[targetLang]) {
-      return mapping[targetLang];
+      const result = mapping[targetLang];
+      // Ensure we return a string, not an object
+      if (typeof result === 'string') {
+        return result;
+      } else if (typeof result === 'object' && result !== null) {
+        console.warn(`⚠️ translateRisk: Expected string but got object for ${risk}[${targetLang}]:`, result);
+        // Try to extract a reasonable string representation
+        return result.en || result.zh || String(result);
+      }
     }
 
     // If no mapping found, return original
-    return risk;
+    return String(risk);
   }
 
   /**
@@ -222,7 +246,15 @@ export class HybridTranslationService {
 
     const mapping = this.staticMappings.confidence[confidence];
     if (mapping && mapping[targetLang]) {
-      return mapping[targetLang];
+      const result = mapping[targetLang];
+      // Ensure we return a string, not an object
+      if (typeof result === 'string') {
+        return result;
+      } else if (typeof result === 'object' && result !== null) {
+        console.warn(`⚠️ translateConfidence: Expected string but got object for ${confidence}[${targetLang}]:`, result);
+        // Try to extract a reasonable string representation
+        return result.en || result.zh || String(result);
+      }
     }
 
     // If no mapping found, return original
@@ -243,13 +275,25 @@ export class HybridTranslationService {
     // Try tech terms
     const techMapping = this.staticMappings.terms[text];
     if (techMapping && techMapping[targetLang]) {
-      return techMapping[targetLang];
+      const result = techMapping[targetLang];
+      if (typeof result === 'string') {
+        return result;
+      } else if (typeof result === 'object' && result !== null) {
+        console.warn(`⚠️ tryStaticMapping(tech): Expected string but got object for ${text}[${targetLang}]:`, result);
+        return result.en || result.zh || String(result);
+      }
     }
 
     // Try common phrases
     const phraseMapping = this.staticMappings.phrases[text];
     if (phraseMapping && phraseMapping[targetLang]) {
-      return phraseMapping[targetLang];
+      const result = phraseMapping[targetLang];
+      if (typeof result === 'string') {
+        return result;
+      } else if (typeof result === 'object' && result !== null) {
+        console.warn(`⚠️ tryStaticMapping(phrase): Expected string but got object for ${text}[${targetLang}]:`, result);
+        return result.en || result.zh || String(result);
+      }
     }
 
     return null;
@@ -289,7 +333,7 @@ export class HybridTranslationService {
       if (mapping && mapping[targetLang] && replacedText.includes(term)) {
         const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
         const beforeReplace = replacedText;
-        replacedText = replacedText.replace(regex, mapping[targetLang]);
+        replacedText = replacedText.replace(regex, typeof mapping[targetLang] === 'string' ? mapping[targetLang] : (mapping[targetLang]?.en || mapping[targetLang]?.zh || String(mapping[targetLang])));
         
         if (beforeReplace !== replacedText) {
           replacementCount++;
@@ -364,7 +408,27 @@ Now translate the following text:`
       // Stream AI response
       let translatedText = '';
       for await (const chunk of this.aiAdapter.streamChat(messages, { signal: controller.signal })) {
-        translatedText += chunk;
+        // Handle both string chunks and object chunks
+        if (typeof chunk === 'string') {
+          translatedText += chunk;
+        } else if (chunk && typeof chunk === 'object') {
+          if (chunk.content && typeof chunk.content === 'string') {
+            translatedText += chunk.content;
+          } else if (chunk.done && chunk.fullText && typeof chunk.fullText === 'string') {
+            // Use final full text if available
+            translatedText = chunk.fullText;
+            break; // Exit loop when done
+          } else {
+            console.warn('⚠️ Unexpected chunk format in AI translation:', chunk);
+            // Try to extract any string content
+            const stringContent = String(chunk.content || chunk.text || chunk.message || '');
+            if (stringContent && stringContent !== '[object Object]') {
+              translatedText += stringContent;
+            }
+          }
+        } else {
+          console.warn('⚠️ Invalid chunk type in AI translation:', typeof chunk, chunk);
+        }
       }
 
       clearTimeout(timeoutId);
@@ -424,7 +488,27 @@ Translate this text completely to ${this.getLanguageName(targetLang)}:`
 
       let translatedText = '';
       for await (const chunk of this.aiAdapter.streamChat(messages)) {
-        translatedText += chunk;
+        // Handle both string chunks and object chunks
+        if (typeof chunk === 'string') {
+          translatedText += chunk;
+        } else if (chunk && typeof chunk === 'object') {
+          if (chunk.content && typeof chunk.content === 'string') {
+            translatedText += chunk.content;
+          } else if (chunk.done && chunk.fullText && typeof chunk.fullText === 'string') {
+            // Use final full text if available
+            translatedText = chunk.fullText;
+            break; // Exit loop when done
+          } else {
+            console.warn('⚠️ Unexpected chunk format in retry translation:', chunk);
+            // Try to extract any string content
+            const stringContent = String(chunk.content || chunk.text || chunk.message || '');
+            if (stringContent && stringContent !== '[object Object]') {
+              translatedText += stringContent;
+            }
+          }
+        } else {
+          console.warn('⚠️ Invalid chunk type in retry translation:', typeof chunk, chunk);
+        }
       }
 
       return translatedText.trim();

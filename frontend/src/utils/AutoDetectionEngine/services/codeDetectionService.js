@@ -13,6 +13,7 @@ import {
   cleanAIResponse,
   extractTableFromResponse,
 } from '../utils/promptFormatter.js';
+import { detectUserLanguage } from '../utils/languageDetector.js';
 
 /**
  * @typedef {Object} DefectDetectionResult
@@ -77,12 +78,17 @@ async function getUEDefectDetectionPrompt(projectType) {
   }
 
   try {
-    serverLog?.info(`📝 尝试从 API 获取提示词... 项目类型: ${projectType}`);
-    const response = await fetch(`/api/prompts/ue-static-defect?type=${projectType}`);
+    // Detect user language
+    const userLang = detectUserLanguage();
+    
+    serverLog?.info(`📝 尝试从 API 获取提示词... 项目类型: ${projectType}, 语言: ${userLang}`);
+    const response = await fetch(`/api/prompts/ue-static-defect?type=${projectType}&lang=${userLang}`);
     
     if (response.ok) {
       const prompt = await response.text();
-      const promptFile = projectType === 'ue_cpp' ? 'ue5_cpp_prompt.md' : 'ue5_blueprint_prompt.md';
+      const promptFile = projectType === 'ue_cpp' 
+        ? (userLang === 'zh' ? 'ue5_cpp_prompt.md' : 'ue5_cpp_prompt_en.md')
+        : (userLang === 'zh' ? 'ue5_blueprint_prompt.md' : 'ue5_blueprint_prompt_en.md');
       serverLog?.info(`✓ 成功从 API 获取提示词，长度: ${prompt.length} 字符`);
       serverLog?.info(`✓ 提示词来源: ${promptFile} 文件`);
       return prompt;
@@ -218,12 +224,16 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
     const systemPrompt = await getUEDefectDetectionPrompt(projectType);
     serverLog?.info(`提示词长度: ${systemPrompt.length} 字符`);
     
-    // Build user message
+    // Detect user language for user message
+    const userLang = detectUserLanguage();
+    
+    // Build user message based on language
     let userMessage = '';
     
     if (pairedFile) {
       // If paired file found, analyze together
-      userMessage = `请对以下C++代码文件进行静态缺陷检测：
+      if (userLang === 'zh') {
+        userMessage = `请对以下C++代码文件进行静态缺陷检测：
 
 **头文件：${fileInfo.path}**
 文件大小：${content.length} 字符
@@ -245,9 +255,34 @@ ${pairedFile.content}
 - 只报告真正未初始化的成员变量，不要报告已在构造函数中初始化的变量
 
 请按照指定的缺陷类别进行检测，并以Markdown表格格式输出结果。`;
+      } else {
+        userMessage = `Please perform static defect detection on the following C++ code files:
+
+**Header file: ${fileInfo.path}**
+File size: ${content.length} characters
+
+\`\`\`cpp
+${content}
+\`\`\`
+
+**Implementation file: ${pairedFile.path}**
+File size: ${pairedFile.content.length} characters
+
+\`\`\`cpp
+${pairedFile.content}
+\`\`\`
+
+**Important notes:**
+- These are paired header and implementation files, please analyze them together
+- When checking member variables, please check if they are initialized in the constructor (in the implementation file)
+- Only report truly uninitialized member variables, do not report variables already initialized in the constructor
+
+Please detect defects according to the specified categories and output the results in Markdown table format.`;
+      }
     } else {
       // Analyze separately
-      userMessage = `请对以下C++代码文件进行静态缺陷检测：
+      if (userLang === 'zh') {
+        userMessage = `请对以下C++代码文件进行静态缺陷检测：
 
 文件路径：${fileInfo.path}
 文件大小：${content.length} 字符
@@ -258,6 +293,19 @@ ${content}
 \`\`\`
 
 请按照指定的缺陷类别进行检测，并以Markdown表格格式输出结果。`;
+      } else {
+        userMessage = `Please perform static defect detection on the following C++ code file:
+
+File path: ${fileInfo.path}
+File size: ${content.length} characters
+
+Code content:
+\`\`\`cpp
+${content}
+\`\`\`
+
+Please detect defects according to the specified categories and output the results in Markdown table format.`;
+      }
     }
 
     // Build message history

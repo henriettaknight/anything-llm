@@ -6,6 +6,8 @@
  * in Markdown table format.
  */
 
+import { detectUserLanguage } from './languageDetector.js';
+
 /**
  * @typedef {Object} DetectionDefect
  * @property {string} no - Defect number
@@ -23,19 +25,41 @@
 /**
  * Load prompt template from file
  * 
- * @param {string} promptName - Name of the prompt template
+ * @param {string} promptName - Name of the prompt template (e.g., "ue5_cpp_prompt", "ue5_blueprint_prompt")
+ * @param {string} [language] - Optional language override ('zh' or 'en'). If not provided, auto-detects from system
  * @returns {Promise<string>} - The prompt template content
  */
-export async function loadPromptTemplate(promptName = "ue5_cpp_prompt") {
+export async function loadPromptTemplate(promptName = "ue5_cpp_prompt", language = null) {
   try {
-    // In a real implementation, this would fetch from the server or use a bundled file
-    // For now, we'll use a dynamic import or fetch
+    // Auto-detect language if not provided
+    const userLang = language || detectUserLanguage();
+    
+    // Build prompt file name based on language
+    // Chinese: use base name (e.g., "ue5_cpp_prompt.md")
+    // English: append "_en" (e.g., "ue5_cpp_prompt_en.md")
+    const promptFileName = userLang === 'zh' 
+      ? `${promptName}.md`
+      : `${promptName}_en.md`;
+    
+    console.log(`🌐 Loading prompt: ${promptFileName} (detected language: ${userLang})`);
+    
+    // Try to load the language-specific prompt
     const response = await fetch(
-      `/src/utils/AutoDetectionEngine/prompts/${promptName}.md`
+      `/src/utils/AutoDetectionEngine/prompts/${promptFileName}`
     );
     
     if (!response.ok) {
-      throw new Error(`Failed to load prompt template: ${response.statusText}`);
+      // If language-specific prompt not found, try fallback to base prompt
+      console.warn(`Prompt file ${promptFileName} not found, trying fallback...`);
+      const fallbackResponse = await fetch(
+        `/src/utils/AutoDetectionEngine/prompts/${promptName}.md`
+      );
+      
+      if (!fallbackResponse.ok) {
+        throw new Error(`Failed to load prompt template: ${fallbackResponse.statusText}`);
+      }
+      
+      return await fallbackResponse.text();
     }
     
     return await response.text();
@@ -85,21 +109,27 @@ function getDefaultPrompt() {
  * @param {string} fileContent - The code file content
  * @param {string} fileName - The file name
  * @param {string} [promptTemplate] - Optional custom prompt template
+ * @param {string} [language] - Optional language override
  * @returns {Promise<Array<{role: string, content: string}>>} - Formatted messages
  */
 export async function formatDetectionPrompt(
   fileContent,
   fileName,
-  promptTemplate = null
+  promptTemplate = null,
+  language = null
 ) {
+  // Auto-detect language if not provided
+  const userLang = language || detectUserLanguage();
+  
   // Load prompt template if not provided
-  const template = promptTemplate || (await loadPromptTemplate());
+  const template = promptTemplate || (await loadPromptTemplate("ue5_cpp_prompt", userLang));
 
   // Create system prompt with template
   const systemPrompt = template;
 
-  // Create user prompt with file content
-  const userPrompt = `请分析以下代码文件并生成缺陷报告：
+  // Create user prompt with file content (language-specific)
+  const userPrompt = userLang === 'zh' 
+    ? `请分析以下代码文件并生成缺陷报告：
 
 文件名：${fileName}
 
@@ -108,7 +138,17 @@ export async function formatDetectionPrompt(
 ${fileContent}
 \`\`\`
 
-请严格按照上述格式输出Markdown表格形式的缺陷报告。`;
+请严格按照上述格式输出Markdown表格形式的缺陷报告。`
+    : `Please analyze the following code file and generate a defect report:
+
+File name: ${fileName}
+
+Code content:
+\`\`\`cpp
+${fileContent}
+\`\`\`
+
+Please strictly follow the format above and output the defect report in Markdown table format.`;
 
   return [
     {

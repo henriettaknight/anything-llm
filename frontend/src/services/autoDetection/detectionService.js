@@ -202,7 +202,7 @@ class DetectionService {
       const config = this.currentStatus.config || {
         targetDirectory: '',
         detectionTime: '09:00',
-        projectType: '', // Add projectType
+        projectType: 'ue_cpp', // 🔧 修改默认值为 ue_cpp
         enabled: true,
         fileTypes: ['.h', '.cpp', '.c', '.hpp', '.cc'],
         excludePatterns: ['**/node_modules/**', '**/build/**', '**/dist/**', '**/.git/**'],

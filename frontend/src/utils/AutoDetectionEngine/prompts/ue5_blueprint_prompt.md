@@ -48,17 +48,17 @@
 #### 不报告的情况（避免误报）
 
 **A. 引擎保证有效的 API（极少数）**
-- `Get World` - 在游戏运行时始终有效
-- `Get Game Instance` - 在游戏运行时始终有效
-- `Get Player Controller (Index 0)` - 在单人游戏中始终有效
-- `Get Owning Player` - 在 Widget 中始终有效
+- Get World - 在游戏运行时始终有效
+- Get Game Instance - 在游戏运行时始终有效
+- Get Player Controller (Index 0) - 在单人游戏中始终有效
+- Get Owning Player - 在 Widget 中始终有效
 
 **注意：以下 API 不保证有效，需要检查：**
-- ❌ `Get Pawn` - 可能为 None（角色死亡、未 Possess 等）
-- ❌ `Get Owner` - 可能为 None（未设置 Owner）
-- ❌ `Get Instigator` - 可能为 None（未设置 Instigator）
-- ❌ `Get Player State` - 可能为 None（网络延迟、未初始化）
-- ❌ `Get Controller` - 可能为 None（Pawn 未被 Possess）
+- Get Pawn - 可能为 None（角色死亡或未 Possess 等）
+- Get Owner - 可能为 None（未设置 Owner）
+- Get Instigator - 可能为 None（未设置 Instigator）
+- Get Player State - 可能为 None（网络延迟或未初始化）
+- Get Controller - 可能为 None（Pawn 未被 Possess）
 
 **B. 编辑器中已添加的组件**
 - `Get Component by Class` - 如果组件在编辑器的 Components 面板中已添加
@@ -84,83 +84,43 @@
 - `Cast → Success` 分支中使用的对象（Cast Failed 已连接）
 
 **F. 特殊的安全模式（已检查的对象）**
-- `Get Pawn → IsValid → Branch → True → Use Pawn` - 已检查，安全
-- `Get Pawn → != None → Branch → True → Use Pawn` - 已检查，安全
-- `Try Get Pawn Owner` - 专门设计为安全的 API，失败返回 None 但不崩溃
-- `Get Component → Branch → True → Use Component` - 已检查，安全
+- Get Pawn 后通过 IsValid 检查再使用 - 已检查，安全
+- Get Pawn 后通过 != None 检查再使用 - 已检查，安全
+- Try Get Pawn Owner - 专门设计为安全的 API，失败返回 None 但不崩溃
+- Get Component 后通过 Branch 检查再使用 - 已检查，安全
 
 **G. 同一对象的多次使用（隐式验证）**
 - 如果对象在同一函数中第一次使用时已隐式验证（如调用了方法未崩溃），后续使用假设为安全
-- 例：`Actor.GetLocation → Actor.GetRotation` - 第一次调用成功说明 Actor 有效
+- 例：Actor.GetLocation 后调用 Actor.GetRotation - 第一次调用成功说明 Actor 有效
 - **注意**：这仅适用于同一执行路径，不适用于不同的事件或函数
 
 **H. 网络相关的特殊情况（有条件保证）**
-- `Get Player State` - 仅在 PlayerController 的 BeginPlay 之后且网络已同步时有效
-- `Get Pawn` - 仅在 PlayerController 的 OnPossess 事件之后有效
-- `Get Controller` - 仅在 Pawn 的 OnPossessed 事件之后有效
-- **重要**：在其他情况下（如 BeginPlay、Tick），这些 API 可能返回 None，必须检查
+- Get Player State - 仅在 PlayerController 的 BeginPlay 之后且网络已同步时有效
+- Get Pawn - 仅在 PlayerController 的 OnPossess 事件之后有效
+- Get Controller - 仅在 Pawn 的 OnPossessed 事件之后有效
+- **重要**：在其他情况下（如 BeginPlay 或 Tick），这些 API 可能返回 None，必须检查
 
 #### 具体示例（明确的报告规则）
 
-**❌ 必须报告：**
-```
-1. Spawn Actor BP_Enemy → Set Actor Location
-   （Spawn 可能失败，未检查）
+**❌ 必须报告的情况：**
+1. Spawn Actor 后直接使用返回值且未检查
+2. Cast 节点的 Cast Failed 引脚未连接
+3. Get Actor of Class 后直接使用且未检查
+4. Get Pawn 后直接使用且未检查
+5. Array Find 返回值直接用于 Get 且未检查是否为 -1
+6. Load Asset 后直接使用且未检查
+7. Get Controller 后直接使用且未检查
 
-2. Cast to BP_Character → Get Mesh Component
-   （Cast Failed 引脚未连接）
-
-3. Get Actor of Class BP_GameMode → Call Function
-   （可能找不到，未检查）
-
-4. Get Player Controller → Get Pawn → Set Actor Location
-   （Get Pawn 可能返回 None，未检查）
-
-5. Event BeginPlay → Get Pawn → Cast to Character
-   （BeginPlay 时 Pawn 可能未 Possess，未检查）
-
-6. Array Find Item → Get (at Index)
-   （Find 可能返回 -1，未检查）
-
-7. Load Asset Sync → Set Static Mesh
-   （加载可能失败，未检查）
-```
-
-**✅ 不报告（避免误报）：**
-```
-1. Function(Actor Parameter) → Actor.GetLocation
-   （参数非 Optional，编辑器已验证）
-
-2. Get Component by Class (Mesh) → Set Material
-   （组件在编辑器中已添加）
-
-3. Get Player Controller → Call Function
-   （Get Player Controller 引擎保证有效）
-
-4. Get Pawn → IsValid → Branch True → Set Location
-   （已通过 IsValid 检查）
-
-5. BeginPlay: Set MyActor → Tick: MyActor.GetLocation
-   （变量在 BeginPlay 中已初始化）
-
-6. IsValid(Actor) → Branch True → Actor.Destroy
-   （已通过 IsValid 检查）
-
-7. Cast to Character → Success → Get Mesh / Failed → Print
-   （Cast Failed 已处理）
-
-8. Get World → Spawn Actor
-   （Get World 引擎保证有效）
-
-9. Event OnPossess → Possessed Pawn → Set Location
-   （事件参数保证有效）
-
-10. Get Variable (MyComponent) → Set Active
-    （变量在 Class Defaults 中已设置）
-
-11. Actor.GetLocation → Actor.GetRotation
-    （第一次调用成功说明 Actor 有效）
-```
+**✅ 不报告的情况（避免误报）：**
+1. 函数参数直接使用（非 Optional 参数）
+2. Get Component by Class 获取编辑器中已添加的组件
+3. Get Player Controller / Get World / Get Game Instance 等引擎保证有效的 API
+4. 已通过 IsValid 或 Branch 检查后使用的对象
+5. 在 BeginPlay 中初始化后在 Tick 中使用的变量
+6. Cast 节点已连接 Cast Failed 分支的情况
+7. 在 Class Defaults 中已设置默认值的变量
+8. 事件参数（如 OnPossess 的 Possessed Pawn）
+9. 同一执行路径中第一次调用成功后的后续调用
 
 #### 检测流程（减少误报）
 1. **识别节点类型**：确认是否为上述 5 种必须报告的情况
@@ -192,8 +152,8 @@
   - 循环中包含 Delay 节点（会导致异步问题）
   - 循环索引计算错误（如 Length - 1 未处理空数组）
 - **具体示例**：
-  - `For Each Loop → Remove from Array`（迭代器失效）
-  - `While Loop` 无退出条件或条件永远为 True
+  - For Each Loop 中调用 Remove from Array（迭代器失效）
+  - While Loop 无退出条件或条件永远为 True
 
 ### ARRAY（数组操作问题）
 - **核心问题**：数组越界或无效访问
@@ -205,8 +165,8 @@
   - Find 节点返回 -1 后直接用于 Get
   - 数组作为函数参数传递但未检查是否为空
 - **具体示例**：
-  - `Get (at 0) → Use`（数组可能为空）
-  - `Find → Get`（Find 返回 -1 时 Get 会失败）
+  - Get (at 0) 直接使用（数组可能为空）
+  - Find 后直接用于 Get（Find 返回 -1 时 Get 会失败）
 
 ### EVENT（事件/委托问题）
 - **核心问题**：事件绑定泄漏或重复绑定
@@ -218,8 +178,8 @@
   - Multicast Delegate 在客户端调用（应在服务器调用）
   - Timer 设置后未在销毁时 Clear（导致悬空引用）
 - **具体示例**：
-  - `BeginPlay → Bind Event to OnDamaged`（未在 EndPlay 中 Unbind）
-  - `Set Timer by Event → Destroy Actor`（Timer 未清理）
+  - BeginPlay 中 Bind Event to OnDamaged（未在 EndPlay 中 Unbind）
+  - Set Timer by Event 后 Destroy Actor（Timer 未清理）
 
 ### CAST（类型转换问题）
 - **核心问题**：不安全的类型转换
@@ -230,8 +190,8 @@
   - 使用 Cast 代替 Interface 调用（性能问题）
   - 在循环中频繁 Cast（应缓存结果）
 - **具体示例**：
-  - `Get Player Pawn → Cast to MyCharacter → Use`（未处理 Cast 失败）
-  - `For Each Loop → Cast to Enemy`（应使用 Interface）
+  - Get Player Pawn 后 Cast to MyCharacter 直接使用（未处理 Cast 失败）
+  - For Each Loop 中频繁 Cast to Enemy（应使用 Interface）
 
 ### REF（循环引用/硬引用）
 - **核心问题**：资源加载和内存泄漏
@@ -255,8 +215,8 @@
   - Replicated 变量频繁修改（应使用 RPC 或批量更新）
   - 网络相关逻辑未使用 Switch Has Authority 节点
 - **具体示例**：
-  - `Set Health (Replicated) in Tick`（频繁同步）
-  - `Server RPC → Spawn Actor`（未检查 Authority）
+  - Set Health (Replicated) in Tick（频繁同步）
+  - Server RPC 后 Spawn Actor（未检查 Authority）
 
 ### INTERFACE（接口使用问题）
 - **核心问题**：接口调用不当
@@ -279,8 +239,8 @@
   - Construct Object from Class 创建的对象未释放
   - Niagara/Cascade 粒子系统未设置生命周期
 - **具体示例**：
-  - `Create Widget → Store in Variable`（未添加到视口或未释放）
-  - `Spawn Emitter Attached → Loop`（粒子未自动销毁）
+  - Create Widget 后 Store in Variable（未添加到视口或未释放）
+  - Spawn Emitter Attached 在 Loop 中（粒子未自动销毁）
 
 ### INIT（初始化问题）
 - **核心问题**：变量未正确初始化
@@ -291,7 +251,7 @@
   - Component 引用在 BeginPlay 前访问（应在 Construction Script 中获取）
   - 网络同步变量在客户端未初始化（RepNotify 未触发时）
 - **具体示例**：
-  - `Construction Script → Get Health`（Health 可能未初始化）
+  - Construction Script 中 Get Health（Health 可能未初始化）
 
 ### ANIM（动画蓝图问题）
 - **核心问题**：动画蓝图性能和逻辑问题
@@ -315,8 +275,8 @@
   - Widget Animation 未检查是否正在播放
   - Scroll Box 包含大量子 Widget（应使用虚拟化）
 - **具体示例**：
-  - `Event Tick → Set Text`（应使用 Binding 或 Event）
-  - `For Loop → Create Widget`（应使用对象池）
+  - Event Tick 中 Set Text（应使用 Binding 或 Event）
+  - For Loop 中 Create Widget（应使用对象池）
 
 ### COMPILE（编译警告/错误）
 - **核心问题**：蓝图编译问题
@@ -334,14 +294,10 @@
 
 ### 有效性检查模式识别
 **以下模式视为已正确检查，不报告为缺陷：**
-1. IsValid 节点检查后使用
-   - `IsValid → Branch → True → Use Object`
+1. IsValid 节点检查后使用对象
 2. Cast 节点连接了 Cast Failed 分支
-   - `Cast to Type → Success → Use / Cast Failed → Handle`
 3. Switch Has Authority 节点正确使用
-   - `Switch Has Authority → Authority → Server Logic / Remote → Client Logic`
-4. Array Length 检查
-   - `Array Length > 0 → Branch → True → Get (at 0)`
+4. Array Length 检查后访问数组元素
 
 ### 虚假缺陷过滤规则（关键：减少误报）
 
@@ -366,19 +322,17 @@
 **蓝图函数的输入参数默认假设为有效（非空），除非有明确证据表明可能为空：**
 - **原因**：蓝图编辑器在连接节点时会进行类型检查，如果参数类型不匹配或为空，蓝图会显示编译错误
 - **不报告为缺陷的情况**：
-  - 函数参数直接使用（如 `Function(Actor) → Actor.GetLocation`）
-  - 函数参数传递给其他函数（如 `Function(Actor) → OtherFunction(Actor)`）
-  - 函数参数的成员访问（如 `Function(Component) → Component.SetActive`）
+  - 函数参数直接使用
+  - 函数参数传递给其他函数
+  - 函数参数的成员访问
 - **需要报告为缺陷的情况**（有明确证据表明可能为空）：
   - 参数标记为 Optional（可选参数）
   - 参数类型为 Soft Reference（软引用）
   - 函数注释明确说明"参数可能为 None"
   - 函数内部有 IsValid 检查但检查后的分支逻辑不完整
 - **示例**：
-  ```
-  ✅ 不报告：Function SetWeapon(WeaponComponent) → WeaponComponent.SetVisibility(true)
-  ❌ 报告：Function SetWeapon(WeaponComponent [Optional]) → WeaponComponent.SetVisibility(true)
-  ```
+  - 不报告：函数接收 WeaponComponent 参数后直接调用 SetVisibility
+  - 报告：函数接收 Optional 的 WeaponComponent 参数后直接调用 SetVisibility
 
 #### 规则 6：蓝图返回值的上下文检查
 **不要孤立地判断返回值是否检查，要看调用上下文：**
@@ -439,15 +393,21 @@
 示例：
 | No | Category | Blueprint | Graph/Function | NodeDescription | Risk | HowToTrigger | SuggestedFix | Confidence |
 |----|----------|-----------|----------------|-----------------|------|--------------|--------------|------------|
-| 1 | NULL | Content/Blueprints/Characters/BP_Player | Event BeginPlay | Get Player Controller → Get Pawn → Set Actor Location | 空引用崩溃 | Pawn 未生成时调用 | 在 Get Pawn 后添加 IsValid 检查 | High |
-| 2 | TICK | Content/Blueprints/AI/BP_Enemy | Event Tick | Get All Actors of Class → For Each Loop | 严重性能问题 | 每帧执行，敌人数量多时卡顿 | 使用 Timer 每 0.5 秒执行一次，或使用 Perception System | High |
-| 3 | LOOP | Content/Blueprints/Inventory/BP_Inventory | AddItem Function | For Each Loop → Remove from Array | 迭代器失效 | 循环中移除元素导致跳过或崩溃 | 使用 For Loop (倒序) 或先收集要移除的索引 | High |
+| 1 | NULL | Content/Blueprints/Characters/BP_Player | Event BeginPlay | Get Pawn 后直接调用 Set Actor Location | 空引用崩溃 | Pawn 未生成时调用 | 在 Get Pawn 后添加 IsValid 检查 | High |
+| 2 | TICK | Content/Blueprints/AI/BP_Enemy | Event Tick | Get All Actors of Class 在 Tick 中调用 | 严重性能问题 | 每帧执行导致卡顿 | 改用 Timer 每 0.5 秒执行一次 | High |
+| 3 | LOOP | Content/Blueprints/Inventory/BP_Inventory | AddItem Function | For Each Loop 中调用 Remove from Array | 迭代器失效 | 循环中移除元素导致崩溃 | 改用 For Loop 倒序遍历 | High |
 
 ### 格式要求补充
 - **禁止报告虚假缺陷**：按照上述"虚假缺陷过滤规则"严格过滤
 - **禁止重复报告**：同一问题的多处出现，仅列示代表性样本并注明"同类多处"
 - **禁止模糊描述**：每个缺陷必须有明确的节点路径和触发条件
-- Risk | HowToTrigger | SuggestedFix 使用中文回答
+- **CSV 格式要求**：
+  - Risk / HowToTrigger / SuggestedFix 字段使用中文回答
+  - NodeDescription 字段避免使用箭头符号，改用"后"、"然后"等连接词
+  - SuggestedFix 字段必须简洁，单行描述，不超过50字
+  - 避免在字段内使用逗号，改用分号或"和"字连接
+  - 所有字段内容必须是单行文本，不包含换行符
+  - 复杂的修复建议应拆分为多条独立的缺陷记录
 
 ## 报告要求（减少误报的关键原则）
 
@@ -517,13 +477,18 @@
 4. Spawn Emitter 未 Auto Destroy
 
 ### 报告格式要求
-- 避免冗长描述，专注关键节点与可操作建议。
-- 若存在相同模式的多处，仅列示代表性样本并注明"同类多处"以控制篇幅。
-- Risk | HowToTrigger | SuggestedFix 使用中文回答。
-- **每个缺陷必须有明确的节点路径和触发条件**。
-- **禁止报告虚假缺陷**：按照上述"虚假缺陷过滤规则"严格过滤。
-- **禁止重复报告**：同一问题的多处出现，仅列示代表性样本。
-- **禁止模糊描述**：必须指明具体的节点和执行路径。
+- 避免冗长描述，专注关键节点与可操作建议
+- 若存在相同模式的多处，仅列示代表性样本并注明"同类多处"以控制篇幅
+- Risk / HowToTrigger / SuggestedFix 使用中文回答
+- **每个缺陷必须有明确的节点路径和触发条件**
+- **禁止报告虚假缺陷**：按照上述"虚假缺陷过滤规则"严格过滤
+- **禁止重复报告**：同一问题的多处出现，仅列示代表性样本
+- **禁止模糊描述**：必须指明具体的节点和执行路径
+- **CSV 格式严格要求**：
+  - NodeDescription 使用"后"、"然后"等词代替箭头符号
+  - SuggestedFix 必须单行且不超过50字
+  - 所有字段避免使用逗号，改用分号或"和"字
+  - 所有字段必须是单行文本，不包含任何换行符
 
 ### 最终检查清单（报告前必须确认）
 在报告任何缺陷前，必须确认以下问题：

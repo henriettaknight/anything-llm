@@ -38,8 +38,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
   const checkBrowserSupport = () => {
     const hasFileSystemAPI =
       typeof window !== "undefined" &&
-      (window.showDirectoryPicker !== undefined ||
-        navigator.storage?.getDirectory !== undefined);
+      typeof window.showDirectoryPicker === "function";
     const hasIndexedDB = typeof window !== "undefined" && window.indexedDB;
 
     setBrowserSupport({
@@ -68,16 +67,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
   };
 
   const handleSelectDirectory = async () => {
-    if (!browserSupport.fileSystemAPI) {
-      setErrors({
-        directory: t(
-          "autodetection.config.error.fileSystemNotSupported",
-          "File System API is not supported in your browser"
-        ),
-      });
-      return;
-    }
-
+    // 移除浏览器检查，直接尝试使用 File System API
     try {
       setIsSelectingDirectory(true);
       const handle = await window.showDirectoryPicker();
@@ -105,11 +95,19 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
         return;
       }
       console.error("Error selecting directory:", error);
+      
+      // 显示更详细的错误信息
+      let errorMessage = "Failed to select directory";
+      if (error.name === "NotSupportedError") {
+        errorMessage = "File System API is not supported in this browser or context";
+      } else if (error.name === "SecurityError") {
+        errorMessage = "Security error: File System API requires HTTPS or localhost";
+      } else if (error.message) {
+        errorMessage = `Failed to select directory: ${error.message}`;
+      }
+      
       setErrors({
-        directory: t(
-          "autodetection.config.error.directorySelectionFailed",
-          "Failed to select directory"
-        ),
+        directory: errorMessage,
       });
     } finally {
       setIsSelectingDirectory(false);
@@ -233,8 +231,8 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
         {t("autodetection.config.title", "Configuration")}
       </h2>
 
-      {/* Browser Support Warning */}
-      {!browserSupport.fileSystemAPI && (
+      {/* Browser Support Warning - 移除警告 */}
+      {false && (
         <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-yellow-800 text-sm">
           <p className="font-semibold mb-1">
             {t("autodetection.config.warning.browserSupport", "Browser Compatibility")}
@@ -269,7 +267,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
             </div>
             <button
               onClick={handleSelectDirectory}
-              disabled={isSelectingDirectory || isSaving || !browserSupport.fileSystemAPI}
+              disabled={isSelectingDirectory || isSaving}
               className="px-4 py-2 bg-gray-50 text-gray-800 rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-gray-200"
             >
               {isSelectingDirectory
@@ -375,7 +373,7 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
         {/* Save Button */}
         <button
           onClick={handleSave}
-          disabled={isSaving || !browserSupport.fileSystemAPI}
+          disabled={isSaving}
           className="w-full px-4 py-2 bg-gray-50 text-gray-800 rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-gray-200"
         >
           {isSaving

@@ -412,10 +412,10 @@ class ReportGenerationServiceImpl {
   /**
    * Export report as CSV
    * @param {DetectionReport} report - Report to export
-   * @param {string} [targetLang='zh'] - Target language
+   * @param {string} [targetLang='auto'] - Target language ('auto' means use original AI output without translation)
    * @returns {Promise<string>} - CSV content
    */
-  async exportReportAsCSV(report, targetLang = 'zh') {
+  async exportReportAsCSV(report, targetLang = 'auto') {
     console.log(`[DEBUG exportReportAsCSV] 开始导出 CSV, 目标语言: ${targetLang}`);
     console.log(`[DEBUG exportReportAsCSV] 报告数据:`, {
       groupName: report.groupName,
@@ -450,50 +450,83 @@ class ReportGenerationServiceImpl {
         );
         
         for (const defect of validDefects) {
-          // 优先使用原始字段，如果没有则从 description 中分离
+          // Use original fields directly without translation (AI already outputs in correct language)
           let risk = '';
           let howToTrigger = '';
           
           if (defect.risk && defect.howToTrigger) {
-            // 使用保留的原始字段并翻译
-            risk = this.escapeCSV(await this.translateText(defect.risk, targetLang));
-            howToTrigger = this.escapeCSV(await this.translateText(defect.howToTrigger, targetLang));
+            // Use preserved original fields directly
+            let defectRisk = defect.risk;
+            let defectHowToTrigger = defect.howToTrigger;
+            
+            if (typeof defectRisk === 'object' && defectRisk !== null) {
+              console.warn('⚠️ defect.risk is object:', defectRisk);
+              defectRisk = defectRisk.zh || defectRisk.en || String(defectRisk);
+            }
+            
+            if (typeof defectHowToTrigger === 'object' && defectHowToTrigger !== null) {
+              console.warn('⚠️ defect.howToTrigger is object:', defectHowToTrigger);
+              defectHowToTrigger = defectHowToTrigger.zh || defectHowToTrigger.en || String(defectHowToTrigger);
+            }
+            
+            // No translation needed - use original AI output
+            risk = this.escapeCSV(defectRisk);
+            howToTrigger = this.escapeCSV(defectHowToTrigger);
           } else {
-            // 降级方案：从 description 中分离
+            // Fallback: split from description
             const descriptionParts = defect.description.split(' - ');
-            risk = this.escapeCSV(await this.translateText(descriptionParts[0] || '', targetLang));
-            howToTrigger = this.escapeCSV(await this.translateText(descriptionParts.slice(1).join(' - ') || '', targetLang));
+            risk = this.escapeCSV(descriptionParts[0] || '');
+            howToTrigger = this.escapeCSV(descriptionParts.slice(1).join(' - ') || '');
           }
           
-          // 优先使用原始的 functionSymbol，如果没有则从 code 中提取第一行
+          // Use original functionSymbol or extract from code
           const functionSymbol = defect.functionSymbol 
             ? this.escapeCSV(defect.functionSymbol)
             : this.escapeCSV(defect.code.split('\n')[0] || defect.code);
           
-          // 优先使用原始的 snippet，如果没有则使用 code
+          // Use original snippet or code
           const snippet = defect.snippet 
             ? this.escapeCSV(defect.snippet)
             : this.escapeCSV(defect.code);
           
-          // 优先使用原始的 lines 字符串（如 "L20–L30"），如果没有则使用单个行号
+          // Use original lines string
           const lines = defect.lines || (defect.line > 0 ? `L${defect.line}` : '');
           
           const confidence = defect.severity === 'high' ? 'High' : defect.severity === 'low' ? 'Low' : 'Medium';
-          const translatedRecommendation = await this.translateText(defect.recommendation, targetLang);
-          const translatedType = await this.translateText(defect.type, targetLang);
+          
+          // Use original fields directly without translation
+          let defectRecommendation = defect.recommendation;
+          if (typeof defectRecommendation === 'object' && defectRecommendation !== null) {
+            console.warn('⚠️ defect.recommendation is object:', defectRecommendation);
+            defectRecommendation = defectRecommendation.zh || defectRecommendation.en || String(defectRecommendation);
+          }
+          
+          let defectType = defect.type;
+          if (typeof defectType === 'object' && defectType !== null) {
+            console.warn('⚠️ defect.type is object:', defectType);
+            defectType = defectType.zh || defectType.en || String(defectType);
+          }
           
           const row = [
             defectIndex++,
-            this.escapeCSV(translatedType),
+            this.escapeCSV(defectType),
             this.escapeCSV(fileResult.file.path),
-            functionSymbol,
-            snippet,
-            lines,
-            risk,
-            howToTrigger,
-            this.escapeCSV(translatedRecommendation),
-            confidence
+            this.escapeCSV(functionSymbol),
+            this.escapeCSV(snippet),
+            this.escapeCSV(lines),
+            risk,  // Already escaped above
+            howToTrigger,  // Already escaped above
+            this.escapeCSV(defectRecommendation),
+            this.escapeCSV(confidence)
           ];
+          
+          // Final safety check: ensure no objects in the row
+          for (let i = 0; i < row.length; i++) {
+            if (typeof row[i] === 'object' && row[i] !== null) {
+              console.error(`❌ CSV row contains object at index ${i}:`, row[i]);
+              row[i] = row[i].en || row[i].zh || String(row[i]);
+            }
+          }
           
           csv += row.join(',') + '\n';
         }
@@ -589,7 +622,7 @@ class ReportGenerationServiceImpl {
    * @returns {Promise<Object>} Export result with content and metadata
    */
   async exportReport(report, format = 'csv', options = {}) {
-    const { targetLang = 'zh', pretty = true } = options;
+    const { targetLang = 'auto', pretty = true } = options;
     
     let content;
     let mimeType;
@@ -626,19 +659,15 @@ class ReportGenerationServiceImpl {
    * Generate export filename
    * @param {DetectionReport} report - Report
    * @param {string} extension - File extension
-   * @param {string} [targetLang='zh'] - Target language
+   * @param {string} [targetLang='auto'] - Target language (not used anymore since AI outputs in correct language)
    * @returns {string} Filename
    */
-  generateExportFilename(report, extension, targetLang = 'zh') {
+  generateExportFilename(report, extension, targetLang = 'auto') {
     const groupName = report.groupName || 'report';
     const timestamp = new Date(report.timestamp).toISOString().replace(/[:.]/g, '-').split('T')[0];
     
-    // Add language suffix for non-Chinese exports
-    const langSuffix = (targetLang && targetLang !== 'zh' && targetLang !== 'zh-CN') 
-      ? `_${targetLang}` 
-      : '';
-    
-    return `${groupName.toLowerCase()}${langSuffix}_${timestamp}.${extension}`;
+    // No language suffix needed - AI already outputs in user's language
+    return `${groupName.toLowerCase()}_${timestamp}.${extension}`;
   }
 
   /**
@@ -648,6 +677,25 @@ class ReportGenerationServiceImpl {
    */
   escapeCSV(value) {
     if (!value) return '';
+    
+    // Handle object values that might have been passed incorrectly
+    if (typeof value === 'object' && value !== null) {
+      console.warn('⚠️ escapeCSV: Received object instead of string:', value);
+      
+      // Try to extract a meaningful string representation
+      if (value.en) {
+        value = value.en;
+      } else if (value.zh) {
+        value = value.zh;
+      } else if (value.toString && typeof value.toString === 'function') {
+        value = value.toString();
+      } else {
+        value = JSON.stringify(value);
+      }
+    }
+    
+    // Ensure we have a string
+    value = String(value);
     
     // If contains comma, quote, or newline, wrap with quotes and escape internal quotes
     if (value.includes(',') || value.includes('"') || value.includes('\n')) {
@@ -701,7 +749,7 @@ class ReportGenerationServiceImpl {
 
   /**
    * Download report with proper headers and formatting
-   * Supports bilingual download (Chinese + translated version)
+   * Now simplified: AI outputs in user's language, no translation needed
    * @param {DetectionReport} report - Report to download
    * @param {string} [groupName] - Group name
    * @param {string} [format='csv'] - Export format ('csv' or 'json')
@@ -723,32 +771,12 @@ class ReportGenerationServiceImpl {
         format: format
       });
       
-      // Detect user language
-      const userLang = detectUserLanguage();
-      const needsTranslationFlag = needsTranslation();
-      
-      console.log(`🌐 User language: ${userLang}, needs translation: ${needsTranslationFlag}`);
-      
       // Prioritize groupName parameter, then use groupName in report
       const finalGroupName = groupName || report.groupName;
       
-      if (userLang === 'zh' || !needsTranslationFlag) {
-        // Chinese environment: download only Chinese version
-        console.log('📥 Downloading Chinese version only...');
-        await this.downloadFile(report, finalGroupName, 'zh', format);
-      } else {
-        // Non-Chinese environment: download both Chinese and translated versions
-        console.log('📥 Downloading bilingual versions (Chinese + translated)...');
-        
-        // 1. Download Chinese original
-        await this.downloadFile(report, finalGroupName, 'zh', format);
-        
-        // 2. Wait 500ms to avoid browser blocking
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // 3. Download translated version
-        await this.downloadFile(report, finalGroupName, userLang, format);
-      }
+      // Simply download the report - AI already output in correct language
+      console.log('📥 Downloading report (AI output in user language)...');
+      await this.downloadFile(report, finalGroupName, 'auto', format);
       
       console.log(`✅ Download completed`);
     } catch (error) {
@@ -762,14 +790,14 @@ class ReportGenerationServiceImpl {
    * @private
    * @param {DetectionReport} report - Report to download
    * @param {string} groupName - Group name
-   * @param {string} targetLang - Target language
+   * @param {string} targetLang - Target language ('auto' means no translation)
    * @param {string} format - Export format
    * @returns {Promise<void>}
    */
   async downloadFile(report, groupName, targetLang, format) {
     return new Promise(async (resolve) => {
       try {
-        console.log(`[downloadFile] Generating ${format} for language: ${targetLang}`);
+        console.log(`[downloadFile] Generating ${format} (no translation needed - AI output in user language)`);
         
         // Use the new export method
         const exportResult = await this.exportReport(report, format, { targetLang, pretty: true });
@@ -787,11 +815,8 @@ class ReportGenerationServiceImpl {
         const blob = new Blob([content], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         
-        // Generate filename with language suffix
-        const langSuffix = (targetLang && targetLang !== 'zh' && targetLang !== 'zh-CN') 
-          ? `_${targetLang}` 
-          : '';
-        const fileName = `${groupName.toLowerCase()}${langSuffix}.${exportResult.extension}`;
+        // Generate filename without language suffix (AI already output in correct language)
+        const fileName = `${groupName.toLowerCase()}.${exportResult.extension}`;
         
         console.log(`[downloadFile] 生成的文件名: ${fileName}, 格式: ${format}, 大小: ${exportResult.size} bytes`);
         
@@ -839,7 +864,7 @@ class ReportGenerationServiceImpl {
       
       try {
         console.log(`[${i + 1}/${reports.length}] 下载报告: ${report.groupName}`);
-        await this.downloadReport(report, report.groupName, 'zh-CN', format);
+        await this.downloadReport(report, report.groupName, format);
         results.success.push(report.id);
         console.log(`  ✓ 下载成功`);
         
@@ -1164,6 +1189,25 @@ class ReportGenerationServiceImpl {
       return text;
     }
     
+    // Handle object inputs that might have been passed incorrectly
+    if (typeof text === 'object' && text !== null) {
+      console.warn('⚠️ translateText: Received object instead of string:', text);
+      
+      // Try to extract a meaningful string representation
+      if (text.zh) {
+        text = text.zh;
+      } else if (text.en) {
+        text = text.en;
+      } else if (text.toString && typeof text.toString === 'function') {
+        text = text.toString();
+      } else {
+        text = JSON.stringify(text);
+      }
+    }
+    
+    // Ensure we have a string
+    text = String(text);
+    
     try {
       // Use enhanced translation with quality checks
       const result = await enhancedTranslate(
@@ -1182,19 +1226,28 @@ class ReportGenerationServiceImpl {
         console.warn(`⚠️ Translation quality issues for: "${text.substring(0, 50)}..."`, result.validation.issues);
       }
       
+      // Ensure result is a string
+      let translatedText = result.text;
+      if (typeof translatedText === 'object' && translatedText !== null) {
+        console.error('❌ Translation result is object, converting to string:', translatedText);
+        translatedText = translatedText.en || translatedText.zh || String(translatedText);
+      }
+      
+      translatedText = String(translatedText);
+      
       // Check if result still contains Chinese
-      if (containsChinese(result.text)) {
-        console.error(`❌ Translation failed - still contains Chinese: "${result.text}"`);
+      if (containsChinese(translatedText)) {
+        console.error(`❌ Translation failed - still contains Chinese: "${translatedText}"`);
         console.error(`   Original: "${text}"`);
         
         // Last resort: return original with warning
-        return `[TRANSLATION_INCOMPLETE] ${result.text}`;
+        return `[TRANSLATION_INCOMPLETE] ${translatedText}`;
       }
       
-      return result.text;
+      return translatedText;
     } catch (error) {
       console.error('Translation failed, using original text:', error);
-      return text;
+      return String(text);
     }
   }
 
