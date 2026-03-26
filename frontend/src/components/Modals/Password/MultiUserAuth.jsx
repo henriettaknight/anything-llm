@@ -307,7 +307,7 @@ export default function MultiUserAuth() {
                   placeholder={t("login.multi-user.placeholder-username")}
                   className="border-none bg-theme-settings-input-bg text-theme-text-primary placeholder:text-theme-settings-input-placeholder focus:outline-primary-button active:outline-primary-button outline-none text-sm rounded-md p-2.5 w-full h-[48px] md:w-[300px] md:h-[34px]"
                   required={true}
-                  autoComplete="off"
+                  autoComplete="username"
                 />
               </div>
               <div className="w-screen md:w-full md:px-0 px-6">
@@ -317,7 +317,7 @@ export default function MultiUserAuth() {
                   placeholder={t("login.multi-user.placeholder-password")}
                   className="border-none bg-theme-settings-input-bg text-theme-text-primary placeholder:text-theme-settings-input-placeholder focus:outline-primary-button active:outline-primary-button outline-none text-sm rounded-md p-2.5 w-full h-[48px] md:w-[300px] md:h-[34px]"
                   required={true}
-                  autoComplete="off"
+                  autoComplete="current-password"
                 />
               </div>
               {error && <p className="text-red-400 text-sm">Error: {error}</p>}

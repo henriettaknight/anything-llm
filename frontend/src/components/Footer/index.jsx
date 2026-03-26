@@ -115,7 +115,8 @@ export default function Footer() {
   return (
     <div className="flex justify-center mb-2">
       <div className="flex space-x-4">
-        {footerData.map((item, index) => (
+        {/* 注释掉自定义图标按钮（小房子和邮件等） */}
+        {/* {footerData.map((item, index) => (
           <a
             key={index}
             href={item.url}
@@ -132,7 +133,7 @@ export default function Footer() {
               }
             )}
           </a>
-        ))}
+        ))} */}
         {!isMobile && <SettingsButton />}
       </div>
       <Tooltip
