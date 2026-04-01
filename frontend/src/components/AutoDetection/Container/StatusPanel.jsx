@@ -172,7 +172,7 @@ export default function StatusPanel({ status, onStart, onStop }) {
                 ? t("autodetection.status.waitingForDetection", "Waiting for Detection")
                 : t("autodetection.status.nextDetection", "Next Detection")}
             </p>
-            <p className="text-2xl font-bold text-theme-accent-primary">
+            <p className="text-2xl font-bold text-theme-text-primary">
               {countdownDisplay}
             </p>
           </div>
