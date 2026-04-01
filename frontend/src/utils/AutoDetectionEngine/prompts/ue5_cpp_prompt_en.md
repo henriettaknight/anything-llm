@@ -336,6 +336,13 @@ Example:
 - **Prohibit reporting false positives**: Strictly filter according to the above "False Positive Filtering Rules", do not report initialized members, checked pointers, checked return values, etc.
 - **Prohibit duplicate reporting**: For multiple occurrences of the same issue, only list representative samples and note "multiple similar cases"
 - **Prohibit vague descriptions**: Each defect must have clear code evidence and specific trigger conditions
+- **CSV Format Strict Requirements**:
+  - All fields should be in English
+  - Snippet field should avoid using commas; use semicolons or "and" to connect multiple code fragments
+  - SuggestedFix field must be concise; single-line description; no more than 100 characters
+  - Avoid using commas within fields; use semicolons or "and" for connections
+  - All field content must be single-line text without line breaks
+  - Complex fix suggestions should be split into multiple independent defect records
 
 ## Report Requirements
 - All fields should be in English
