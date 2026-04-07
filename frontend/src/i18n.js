@@ -13,6 +13,7 @@ i18next
     defaultNS,
     resources,
     lowerCaseLng: true,
+    load: "languageOnly", // 只加载语言代码部分，忽略地区代码（zh-CN -> zh）
     interpolation: {
       escapeValue: false,
     },
