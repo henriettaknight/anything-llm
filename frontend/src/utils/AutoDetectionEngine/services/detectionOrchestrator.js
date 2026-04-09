@@ -9,6 +9,8 @@ import { detectDefectsInFile } from './codeDetectionService.js';
 import { resumeDetectionService } from './resumeDetectionService.js';
 import SessionStorage, { SessionStatus } from '../storage/sessionStorage.js';
 import { resourceMonitorService } from './resourceMonitorService.js';
+import tokenStatisticsService from './tokenStatisticsService.js';
+import zipPackageService from './zipPackageService.js';
 
 /**
  * @typedef {Object} DetectionSession
@@ -128,6 +130,10 @@ class DetectionOrchestratorImpl {
 
     // Create new session using SessionStorage
     this.currentSession = SessionStorage.createSession(config);
+
+    // Start token statistics session
+    tokenStatisticsService.startSession(this.currentSession.id);
+    console.log('📊 Token statistics session started for:', this.currentSession.id);
 
     // Register callbacks
     if (onProgress) {
@@ -305,6 +311,95 @@ class DetectionOrchestratorImpl {
       SessionStorage.updateStatus(this.currentSession.id, SessionStatus.COMPLETED);
       SessionStorage.updateProgress(this.currentSession.id, { percentage: 100 });
       
+      // End token statistics session and get statistics
+      const tokenStats = tokenStatisticsService.endSession();
+      let tokenStatisticsCSV = '';
+      
+      if (tokenStats && tokenStats.filesProcessed > 0) {
+        console.log('📊 Token statistics collected:', {
+          filesProcessed: tokenStats.filesProcessed,
+          totalTokens: tokenStats.totalTokens
+        });
+        
+        // Detect user language
+        const { detectUserLanguage } = await import('../utils/languageDetector.js');
+        const userLang = detectUserLanguage();
+        const locale = userLang === 'zh' ? 'zh' : 'en';
+        
+        // Generate token statistics CSV with user's language
+        tokenStatisticsCSV = tokenStatisticsService.generateReport(tokenStats, locale);
+      } else {
+        console.warn('⚠️ No token statistics collected during this session');
+      }
+      
+      // Collect all defect reports for ZIP packaging
+      console.log('📦 Collecting all reports for ZIP packaging...');
+      const defectReports = [];
+      
+      for (const result of allResults) {
+        const groupName = result.groupName;
+        const batchResults = (result.batches || []).flatMap(batch => batch.results || []);
+        
+        // Generate CSV content for this group
+        const { default: reportGenerationService } = await import('./reportGenerationService.js');
+        
+        const groupReport = {
+          groupName: groupName,
+          groupPath: result.groupPath || '.',
+          filesScanned: batchResults.length,
+          defectsFound: batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0),
+          defects: batchResults.flatMap(r => r.defects || []),
+          fileResults: batchResults.map(r => ({
+            file: { path: r.filePath || r.file?.path },
+            filePath: r.filePath || r.file?.path,
+            defects: r.defects || [],
+            hasDefects: (r.defects?.length || 0) > 0
+          })),
+          totalFiles: batchResults.length,
+          totalDefects: batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0),
+          summary: { bySeverity: {}, byType: {} }
+        };
+        
+        // Convert to DetectionReport format and export as CSV
+        const detectionReport = reportGenerationService.convertCodeDetectionReport(groupReport);
+        const csvContent = await reportGenerationService.exportReportAsCSV(detectionReport, 'auto');
+        
+        defectReports.push({
+          groupName: groupName,
+          csvContent: csvContent,
+          filesScanned: groupReport.filesScanned,
+          defectsFound: groupReport.defectsFound
+        });
+        
+        console.log(`  ✓ Collected report for: ${groupName}`);
+      }
+      
+      // Generate HTML summary report
+      console.log('📄 Generating HTML summary report...');
+      const htmlReport = zipPackageService.generateHTMLSummary({
+        defectReports: defectReports,
+        tokenStats: tokenStats
+      });
+      
+      // Package everything into ZIP and download
+      console.log('📦 Packaging all reports into ZIP...');
+      
+      // Generate timestamp for filename: YYYY-MM-DD_HH-MM-SS
+      const now = new Date();
+      const timestamp = now.toISOString()
+        .replace(/[:.]/g, '-')
+        .replace('T', '_')
+        .substring(0, 19);
+      
+      await zipPackageService.packageAndDownload({
+        defectReports: defectReports,
+        tokenStatistics: tokenStatisticsCSV,
+        htmlReport: htmlReport,
+        fileName: `report_${timestamp}`
+      });
+      
+      console.log('✅ ZIP package generated and downloaded successfully');
+      
       // Transform allResults to groups format for report generation
       const groupResults = allResults.map(result => {
         const batchResults = (result.batches || []).flatMap(batch => {
@@ -353,6 +448,93 @@ class DetectionOrchestratorImpl {
       
       // Stop resource monitoring
       resourceMonitorService.stopMonitoring();
+      
+      // End token statistics session (even on error)
+      const tokenStats = tokenStatisticsService.endSession();
+      let tokenStatisticsCSV = '';
+      
+      if (tokenStats && tokenStats.filesProcessed > 0) {
+        console.log('📊 Token statistics collected (partial):', {
+          filesProcessed: tokenStats.filesProcessed,
+          totalTokens: tokenStats.totalTokens
+        });
+        
+        // Detect user language
+        const { detectUserLanguage } = await import('../utils/languageDetector.js');
+        const userLang = detectUserLanguage();
+        const locale = userLang === 'zh' ? 'zh' : 'en';
+        
+        // Generate token statistics CSV with user's language
+        tokenStatisticsCSV = tokenStatisticsService.generateReport(tokenStats, locale);
+        
+        // Try to package partial results into ZIP
+        try {
+          console.log('📦 Packaging partial results into ZIP...');
+          const defectReports = [];
+          
+          // Collect whatever reports we have
+          for (const result of allResults || []) {
+            const groupName = result.groupName;
+            const batchResults = (result.batches || []).flatMap(batch => batch.results || []);
+            
+            if (batchResults.length > 0) {
+              const { default: reportGenerationService } = await import('./reportGenerationService.js');
+              
+              const groupReport = {
+                groupName: groupName,
+                groupPath: result.groupPath || '.',
+                filesScanned: batchResults.length,
+                defectsFound: batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0),
+                defects: batchResults.flatMap(r => r.defects || []),
+                fileResults: batchResults.map(r => ({
+                  file: { path: r.filePath || r.file?.path },
+                  filePath: r.filePath || r.file?.path,
+                  defects: r.defects || [],
+                  hasDefects: (r.defects?.length || 0) > 0
+                })),
+                totalFiles: batchResults.length,
+                totalDefects: batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0),
+                summary: { bySeverity: {}, byType: {} }
+              };
+              
+              const detectionReport = reportGenerationService.convertCodeDetectionReport(groupReport);
+              const csvContent = await reportGenerationService.exportReportAsCSV(detectionReport, 'auto');
+              
+              defectReports.push({
+                groupName: groupName,
+                csvContent: csvContent,
+                filesScanned: groupReport.filesScanned,
+                defectsFound: groupReport.defectsFound
+              });
+            }
+          }
+          
+          if (defectReports.length > 0 || tokenStatisticsCSV) {
+            const htmlReport = zipPackageService.generateHTMLSummary({
+              defectReports: defectReports,
+              tokenStats: tokenStats
+            });
+            
+            // Generate timestamp for partial report filename
+            const now = new Date();
+            const timestamp = now.toISOString()
+              .replace(/[:.]/g, '-')
+              .replace('T', '_')
+              .substring(0, 19);
+            
+            await zipPackageService.packageAndDownload({
+              defectReports: defectReports,
+              tokenStatistics: tokenStatisticsCSV,
+              htmlReport: htmlReport,
+              fileName: `report_${timestamp}_partial`
+            });
+            
+            console.log('✅ Partial ZIP package generated');
+          }
+        } catch (zipError) {
+          console.error('❌ Failed to generate partial ZIP:', zipError);
+        }
+      }
       
       // 检查是否是用户取消
       if (this.isCancelled || error.message.includes('取消')) {

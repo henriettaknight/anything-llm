@@ -748,41 +748,81 @@ class ReportGenerationServiceImpl {
   }
 
   /**
-   * Download report with proper headers and formatting
-   * Now simplified: AI outputs in user's language, no translation needed
+   * Download report as ZIP package with HTML summary
    * @param {DetectionReport} report - Report to download
    * @param {string} [groupName] - Group name
-   * @param {string} [format='csv'] - Export format ('csv' or 'json')
    * @returns {Promise<void>}
    */
-  async downloadReport(report, groupName, format = 'csv') {
+  async downloadReport(report, groupName) {
     if (typeof window === 'undefined') {
-      // In Node.js environment, return directly
       return;
     }
 
     try {
-      console.log(`[DEBUG downloadReport] 开始下载报告`);
-      console.log(`[DEBUG downloadReport] 报告数据:`, {
-        groupName: groupName || report.groupName,
-        hasFileResults: !!report.fileResults,
-        fileResultsCount: report.fileResults?.length || 0,
-        totalDefects: report.totalDefects,
-        format: format
+      console.log(`📦 [reportGenerationService.downloadReport] 开始打包下载报告为 ZIP 格式...`);
+      console.log(`📦 [reportGenerationService.downloadReport] 分组名称: ${groupName || report.groupName || 'root'}`);
+      
+      // Import zipPackageService
+      const { default: zipPackageService } = await import('./zipPackageService.js');
+      
+      // Prepare defect reports
+      const defectReports = [{
+        groupName: groupName || report.groupName || 'root',
+        csvContent: await this.exportReportAsCSV(report, 'auto'),
+        filesScanned: report.totalFiles || 0,
+        defectsFound: report.totalDefects || 0
+      }];
+      
+      console.log(`📦 [reportGenerationService.downloadReport] 准备缺陷报告完成`);
+      
+      // Prepare token statistics (if available)
+      let tokenStatistics = null;
+      if (report.metadata?.tokenStats) {
+        tokenStatistics = this.generateTokenStatisticsCSV(report.metadata.tokenStats);
+        console.log(`📦 [reportGenerationService.downloadReport] 包含 token 统计`);
+      }
+      
+      // Generate HTML report
+      const htmlReport = zipPackageService.generateHTMLSummary({
+        defectReports,
+        tokenStats: report.metadata?.tokenStats,
+        sessionId: report.sessionId
       });
       
-      // Prioritize groupName parameter, then use groupName in report
-      const finalGroupName = groupName || report.groupName;
+      console.log(`📦 [reportGenerationService.downloadReport] HTML 报告生成完成`);
       
-      // Simply download the report - AI already output in correct language
-      console.log('📥 Downloading report (AI output in user language)...');
-      await this.downloadFile(report, finalGroupName, 'auto', format);
+      // Package and download as ZIP
+      console.log(`📦 [reportGenerationService.downloadReport] 调用 zipPackageService.packageAndDownload...`);
+      await zipPackageService.packageAndDownload({
+        defectReports,
+        tokenStatistics,
+        htmlReport
+      });
       
-      console.log(`✅ Download completed`);
+      console.log(`✅ [reportGenerationService.downloadReport] ZIP 包下载完成`);
     } catch (error) {
-      console.error('❌ Download failed:', error);
+      console.error('❌ [reportGenerationService.downloadReport] 下载失败:', error);
       throw error;
     }
+  }
+
+  /**
+   * Generate token statistics CSV content
+   * @private
+   */
+  generateTokenStatisticsCSV(tokenStats) {
+    if (!tokenStats) return '';
+    
+    const headers = ['Metric', 'Value'];
+    let csv = headers.join(',') + '\n';
+    
+    csv += `Total Files,${tokenStats.filesProcessed || 0}\n`;
+    csv += `Total Tokens,${tokenStats.totalTokens || 0}\n`;
+    csv += `Prompt Tokens,${tokenStats.totalPromptTokens || 0}\n`;
+    csv += `Completion Tokens,${tokenStats.totalCompletionTokens || 0}\n`;
+    csv += `Duration,${tokenStats.duration || 0}ms\n`;
+    
+    return csv;
   }
 
   /**

@@ -119,7 +119,8 @@ const AutoDetectionAPI = {
   // Download report
   downloadReport: async (reportId) => {
     try {
-      console.log(`[DEBUG AutoDetectionAPI.downloadReport] 开始手动下载报告: ${reportId}`);
+      console.log(`[DEBUG AutoDetectionAPI.downloadReport] 🎯 开始手动下载报告: ${reportId}`);
+      console.log(`[DEBUG AutoDetectionAPI.downloadReport] 📦 将使用 ZIP 格式下载`);
       
       // Get report from storage
       const report = await reportService.getReport(reportId);
@@ -136,10 +137,12 @@ const AutoDetectionAPI = {
         defectsCount: report.report.defects?.length || 0
       });
       
-      // Use reportGenerationService to download (same as auto-download)
+      // Use reportGenerationService to download as ZIP (not CSV)
+      console.log(`[DEBUG AutoDetectionAPI.downloadReport] 📦 调用 reportGenerationService.downloadReport 生成 ZIP 包`);
       const { reportGenerationService } = await import('@/utils/AutoDetectionEngine/services/reportGenerationService.js');
       await reportGenerationService.downloadReport(report.report, report.report.groupName);
       
+      console.log(`[DEBUG AutoDetectionAPI.downloadReport] ✅ ZIP 包下载完成`);
       return { success: true };
     } catch (error) {
       console.error("Error downloading report:", error);

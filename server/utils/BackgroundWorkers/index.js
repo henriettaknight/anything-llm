@@ -15,6 +15,11 @@ class BackgroundService {
       timeout: "1m",
       interval: "12hr",
     },
+    {
+      name: "cleanup-token-statistics",
+      timeout: "2m",
+      cron: process.env.KIRO_CLEANUP_SCHEDULE || "0 3 * * *", // Daily at 3:00 AM by default
+    },
   ];
 
   #documentSyncJobs = [

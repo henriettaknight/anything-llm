@@ -51,6 +51,15 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
     return num?.toLocaleString() || "0";
   };
 
+  const formatZipFileName = (timestamp) => {
+    const date = new Date(timestamp);
+    const formatted = date.toISOString()
+      .replace(/[:.]/g, '-')
+      .replace('T', '_')
+      .substring(0, 19);
+    return `report_${formatted}.zip`;
+  };
+
   return (
     <div className="bg-theme-bg-secondary rounded-lg border border-theme-sidebar-border p-6">
       <div className="flex items-center justify-between mb-6">
@@ -78,44 +87,17 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
-                  {/* Report Header */}
+                  {/* Report Header - ZIP filename */}
                   <div className="mb-2">
                     <p className="text-sm font-semibold text-theme-text-primary truncate">
-                      {report.groupName || t("autodetection.reports.report", "Report")}
+                      {formatZipFileName(report.createdAt || report.timestamp)}
                     </p>
                   </div>
                   
-                  {/* Report Timestamp */}
-                  <p className="text-xs text-theme-text-secondary mb-2">
+                  {/* Date only */}
+                  <p className="text-xs text-theme-text-secondary">
                     {formatDate(report.createdAt || report.timestamp)}
                   </p>
-
-                  {/* Report Stats */}
-                  <div className="grid grid-cols-2 gap-3 mt-3">
-                    <div className="bg-theme-bg-secondary rounded p-2">
-                      <p className="text-xs text-theme-text-secondary mb-1">
-                        {t("autodetection.reports.scannedFiles", "Scanned Files")}
-                      </p>
-                      <p className="text-lg font-semibold text-theme-text-primary">
-                        {formatNumber(report.filesScanned || report.scannedFiles)}
-                      </p>
-                    </div>
-                    <div className="bg-theme-bg-secondary rounded p-2">
-                      <p className="text-xs text-theme-text-secondary mb-1">
-                        {t("autodetection.reports.defectsFound", "Defects Found")}
-                      </p>
-                      <p className="text-lg font-semibold text-theme-accent-primary">
-                        {formatNumber(report.defectsFound)}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Group Path Info */}
-                  {(report.groupPath || report.directory) && (
-                    <p className="text-xs text-theme-text-secondary mt-2 truncate">
-                      {t("autodetection.reports.directory", "Directory")}: {report.groupPath || report.directory}
-                    </p>
-                  )}
                 </div>
 
                 {/* Action Buttons */}
@@ -124,15 +106,11 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
                     onClick={() => handleDownload(report.id)}
                     disabled={isDownloading[report.id] || isDeleting[report.id]}
                     className="px-3 py-1 bg-theme-accent-primary text-white text-sm rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity whitespace-nowrap"
-                    title={t("autodetection.reports.downloadButton", "Download")}
+                    title={t("autodetection.reports.downloadButton", "Download ZIP")}
                   >
                     {isDownloading[report.id]
-                      ? (willTranslate 
-                          ? t("autodetection.reports.translating", "Translating...") 
-                          : t("autodetection.reports.downloading", "Downloading..."))
-                      : (willTranslate
-                          ? t("autodetection.reports.downloadBilingual", "Download (2 files)")
-                          : t("autodetection.reports.download", "Download"))}
+                      ? t("autodetection.reports.downloading", "Downloading...")
+                      : t("autodetection.reports.download", "Download ZIP")}
                   </button>
 
                   <button
@@ -203,13 +181,13 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
           <li>
             {t(
               "autodetection.reports.infoStep1",
-              "Each report contains detection results in CSV format"
+              "Each report is packaged as a ZIP file containing CSV reports and HTML summary"
             )}
           </li>
           <li>
             {t(
               "autodetection.reports.infoStep2",
-              "Download reports to analyze defects and trends"
+              "Download ZIP packages to analyze defects and trends"
             )}
           </li>
           <li>
@@ -218,14 +196,6 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
               "Delete reports to manage storage space"
             )}
           </li>
-          {willTranslate && (
-            <li className="text-theme-accent-primary">
-              🌐 {t(
-                "autodetection.reports.bilingualDownload",
-                "Bilingual download: Chinese original + translated version"
-              )}
-            </li>
-          )}
         </ul>
         
         {/* Language Status */}

@@ -214,11 +214,9 @@ export default function AutoDetectionContainer() {
         // 2. 立即刷新报告列表
         await loadReports();
         
-        // 3. 触发下载（使用已经转换好的 detectionReport）
-        // 注意：不要 await downloadReport，让它在后台执行，避免阻塞
-        reportGenerationService.downloadReport(detectionReport, groupReport.groupName).catch(err => {
-          console.error('下载报告失败:', err);
-        });
+        // 3. 不再为每个分组单独下载 ZIP 包
+        // 最终的总 ZIP 包会在所有检测完成后由 detectionOrchestrator 生成
+        console.log(`✅ 分组报告已保存: ${groupReport.groupName}`);
       }
     } catch (error) {
       console.error(`处理分组报告失败: ${groupReport.groupName}`, error);

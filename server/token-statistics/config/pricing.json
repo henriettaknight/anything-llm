@@ -1,0 +1,30 @@
+{
+  "version": "2026-04",
+  "updatedAt": "2026-04-01T00:00:00Z",
+  "models": {
+    "deepseek": {
+      "name": "DeepSeek",
+      "inputPricePerK": 0.001,
+      "outputPricePerK": 0.002,
+      "currency": "USD"
+    },
+    "claude_sonnet": {
+      "name": "Claude-3.5-Sonnet",
+      "inputPricePerK": 0.003,
+      "outputPricePerK": 0.015,
+      "currency": "USD"
+    },
+    "claude_opus": {
+      "name": "Claude-3-Opus",
+      "inputPricePerK": 0.015,
+      "outputPricePerK": 0.075,
+      "currency": "USD"
+    },
+    "claude_haiku": {
+      "name": "Claude-3-Haiku",
+      "inputPricePerK": 0.00025,
+      "outputPricePerK": 0.00125,
+      "currency": "USD"
+    }
+  }
+}

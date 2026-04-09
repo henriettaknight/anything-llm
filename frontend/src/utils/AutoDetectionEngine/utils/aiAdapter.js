@@ -133,6 +133,34 @@ export class AIAdapter {
   }
 
   /**
+   * Get a single chat completion (non-streaming) - wrapper for compatibility
+   * 
+   * @param {Array<{role: string, content: string}>} messages - Chat messages
+   * @param {Object} options - Options including signal
+   * @returns {Promise<{content: string, usage: Object, done: boolean, fullText: string}>}
+   */
+  async chat(messages, options = {}) {
+    const { signal } = options;
+    let fullText = "";
+    let usage = null;
+
+    for await (const chunk of this.streamChat(messages, { signal })) {
+      if (chunk.done) {
+        fullText = chunk.fullText;
+        usage = chunk.usage || null;
+        break;
+      }
+    }
+
+    return {
+      content: fullText,
+      fullText: fullText,
+      usage: usage,
+      done: true
+    };
+  }
+
+  /**
    * Get a single chat completion (non-streaming)
    * 
    * @param {Array<{role: string, content: string}>} messages - Chat messages

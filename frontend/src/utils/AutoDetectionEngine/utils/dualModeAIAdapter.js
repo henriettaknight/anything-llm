@@ -34,6 +34,140 @@ export class DirectAIAdapter {
   }
 
   /**
+   * Non-streaming chat with direct AI model (for accurate token statistics)
+   * 
+   * @param {Array<{role: string, content: string}>} messages - Chat messages
+   * @param {Object} options - Additional options
+   * @returns {Promise<{content: string, usage: Object}>} - Response with content and token usage
+   */
+  async chat(messages, options = {}) {
+    try {
+      console.log('\n' + '='.repeat(80));
+      console.log('🤖 DirectAIAdapter: Starting non-streaming request');
+      console.log('='.repeat(80));
+      console.log('📍 Target URL:', this.url);
+      console.log('📍 Model:', this.model);
+      console.log('📍 Temperature:', this.temperature);
+      console.log('📝 Messages count:', messages.length);
+      
+      // Log system prompt info
+      const systemMessage = messages.find(m => m.role === 'system');
+      if (systemMessage) {
+        console.log('\n✓ System prompt found:');
+        console.log('  - Length:', systemMessage.content.length, 'characters');
+        console.log('  - First 500 chars:', systemMessage.content.substring(0, 500));
+        console.log('  - Last 200 chars:', systemMessage.content.substring(systemMessage.content.length - 200));
+        console.log('  - MD5 hash:', this._simpleHash(systemMessage.content));
+      } else {
+        console.warn('⚠️ No system prompt found in messages!');
+      }
+      
+      // Log user message info
+      const userMessage = messages.find(m => m.role === 'user');
+      if (userMessage) {
+        console.log('\n✓ User message found:');
+        console.log('  - Length:', userMessage.content.length, 'characters');
+        console.log('  - First 300 chars:', userMessage.content.substring(0, 300));
+      }
+      
+      const requestBody = {
+        model: this.model,
+        messages,
+        stream: false,  // Non-streaming mode for token statistics
+        temperature: this.temperature,
+      };
+      
+      console.log('\n📤 Complete Request Body:');
+      console.log('  - model:', requestBody.model);
+      console.log('  - messagesCount:', requestBody.messages.length);
+      console.log('  - stream:', requestBody.stream);
+      console.log('  - temperature:', requestBody.temperature);
+      console.log('\n📋 Full messages structure:');
+      requestBody.messages.forEach((msg, idx) => {
+        console.log(`  [${idx}] role: ${msg.role}, content length: ${msg.content.length}`);
+      });
+      
+      // Use backend proxy to avoid CORS and Mixed Content issues
+      const useProxy = window.location.protocol === 'https:' && this.url.startsWith('http://');
+      const fullUrl = useProxy 
+        ? '/api/direct-ai-proxy'
+        : `${this.url}/v1/chat/completions`;
+      
+      console.log('\n🌐 Sending HTTP Request:');
+      console.log('  - URL:', fullUrl);
+      console.log('  - Using proxy:', useProxy);
+      console.log('  - Method: POST');
+      console.log('  - Headers:', { 'Content-Type': 'application/json' });
+      console.log('  - Body size:', JSON.stringify(requestBody).length, 'bytes');
+      
+      const requestStartTime = Date.now();
+      
+      const requestPayload = useProxy ? {
+        url: `${this.url}/v1/chat/completions`,
+        body: requestBody
+      } : requestBody;
+      
+      const response = await fetch(fullUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestPayload),
+        signal: options.signal
+      });
+
+      const requestEndTime = Date.now();
+      console.log('\n📥 Response received:');
+      console.log('  - Status:', response.status, response.statusText);
+      console.log('  - Time taken:', requestEndTime - requestStartTime, 'ms');
+      console.log('  - Headers:', Object.fromEntries(response.headers.entries()));
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('\n❌ Direct AI API error:');
+        console.error('  - Status:', response.status);
+        console.error('  - Error text:', errorText);
+        throw new Error(`Direct AI API error: ${response.status} - ${errorText}`);
+      }
+      
+      console.log('\n✅ Response OK, parsing JSON...');
+
+      const data = await response.json();
+      
+      const content = data.choices?.[0]?.message?.content || '';
+      const usage = data.usage || null;
+      
+      console.log('\n✅ Response parsed:');
+      console.log('  - Content length:', content.length);
+      console.log('  - First 500 chars:', content.substring(0, 500));
+      console.log('  - Last 200 chars:', content.substring(content.length - 200));
+      
+      if (usage) {
+        console.log('  - Token usage:', JSON.stringify(usage));
+      } else {
+        console.warn('  - ⚠️ No token usage data in response');
+      }
+      
+      console.log('='.repeat(80) + '\n');
+      
+      return {
+        content,
+        usage,
+        done: true,
+        fullText: content
+      };
+      
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log('⚠️ Direct AI request was cancelled');
+        throw new Error('Direct AI request was cancelled');
+      }
+      console.error('❌ DirectAIAdapter error:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Stream chat with direct AI model
    * 
    * @param {Array<{role: string, content: string}>} messages - Chat messages
@@ -140,6 +274,7 @@ export class DirectAIAdapter {
       let chunkCount = 0;
       let totalContent = '';
       let firstChunkReceived = false;
+      let tokenUsage = null; // 用于存储 token 使用信息
 
       console.log('\n📡 Starting to read stream...');
 
@@ -152,13 +287,17 @@ export class DirectAIAdapter {
             console.log('  - Total content length:', totalContent.length);
             console.log('  - First 500 chars of response:', totalContent.substring(0, 500));
             console.log('  - Last 200 chars of response:', totalContent.substring(totalContent.length - 200));
+            if (tokenUsage) {
+              console.log('  - Token usage:', JSON.stringify(tokenUsage));
+            }
             console.log('='.repeat(80) + '\n');
             
-            // Yield final result
+            // Yield final result with token usage
             yield {
               content: '',
               done: true,
-              fullText: totalContent
+              fullText: totalContent,
+              usage: tokenUsage
             };
             break;
           }
@@ -173,11 +312,15 @@ export class DirectAIAdapter {
             const data = line.slice(6);
             if (data === '[DONE]') {
               console.log('\n✓ Received [DONE] signal');
+              if (tokenUsage) {
+                console.log('  - Final token usage:', JSON.stringify(tokenUsage));
+              }
               // Yield final result before returning
               yield {
                 content: '',
                 done: true,
-                fullText: totalContent
+                fullText: totalContent,
+                usage: tokenUsage
               };
               return;
             }
@@ -185,6 +328,13 @@ export class DirectAIAdapter {
             try {
               const parsed = JSON.parse(data);
               const content = parsed.choices?.[0]?.delta?.content || '';
+              
+              // 提取 token 使用信息（通常在最后一个 chunk 或有 finish_reason 的 chunk 中）
+              if (parsed.usage) {
+                tokenUsage = parsed.usage;
+                console.log('\n📊 Token usage received:', JSON.stringify(tokenUsage));
+              }
+              
               if (content) {
                 chunkCount++;
                 totalContent += content;
@@ -204,7 +354,8 @@ export class DirectAIAdapter {
                 yield {
                   content,
                   done: false,
-                  fullText: totalContent
+                  fullText: totalContent,
+                  usage: tokenUsage
                 };
               }
             } catch (e) {

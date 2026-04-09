@@ -14,6 +14,7 @@ import {
   extractTableFromResponse,
 } from '../utils/promptFormatter.js';
 import { detectUserLanguage } from '../utils/languageDetector.js';
+import tokenStatisticsService from './tokenStatisticsService.js';
 
 /**
  * @typedef {Object} DefectDetectionResult
@@ -205,14 +206,37 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
 
   serverLog?.info(`=== 开始检测文件: ${fileInfo.name} (项目类型: ${projectType}) ===`);
   
+  // 🔧 准备token统计的公共数据（在最外层，确保任何情况都能访问）
+  const detectionStartTime = Date.now();
+  let content = '';
+  let systemPrompt = '';
+  let userMessage = '';
+  let lineStats = null;
+  let moduleName = 'root';
+  
   try {
     // Get file content
-    const content = await getFileContent(fileInfo, directoryHandle);
+    content = await getFileContent(fileInfo, directoryHandle);
     if (!content) {
       serverLog?.warn(`无法读取文件内容: ${fileInfo.path}`);
+      // 🔧 即使读取失败，也记录尝试
+      recordTokenStatisticsOnFailure(fileInfo, detectionStartTime, 'file_read_failed');
       return [];
     }
     serverLog?.info(`文件内容长度: ${content.length} 字符`);
+    
+    // 🔧 提前计算行数统计（确保有数据）
+    lineStats = calculateLineStatistics(content);
+    
+    // 🔧 提前提取模块名（改进逻辑）
+    const pathParts = fileInfo.path.split('/').filter(p => p && p !== '.');
+    // 如果路径只有一个部分（文件名），说明在根目录
+    if (pathParts.length === 1) {
+      moduleName = 'root';
+    } else {
+      // 否则使用第一个目录名作为模块名
+      moduleName = pathParts[0];
+    }
 
     // If it's a .h file, try to find corresponding .cpp file (only for C++ projects)
     let pairedFile = null;
@@ -221,15 +245,13 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
     }
 
     // Get system prompt (must pass projectType)
-    const systemPrompt = await getUEDefectDetectionPrompt(projectType);
+    systemPrompt = await getUEDefectDetectionPrompt(projectType);
     serverLog?.info(`提示词长度: ${systemPrompt.length} 字符`);
     
     // Detect user language for user message
     const userLang = detectUserLanguage();
     
     // Build user message based on language
-    let userMessage = '';
-    
     if (pairedFile) {
       // If paired file found, analyze together
       if (userLang === 'zh') {
@@ -325,42 +347,30 @@ Please detect defects according to the specified categories and output the resul
 
     serverLog?.info(`开始调用AI服务...`);
 
-    // Add timeout mechanism (5 minutes)
+    // Use non-streaming mode for accurate token statistics
     const timeout = 300000; // 300 seconds
-    const startTime = Date.now(); // 🔍 记录开始时间
     let responseContent = '';
+    let tokenUsage = null;
     let abortController = null;
     let timeoutId = null;
+    let detectionError = null;
     
     try {
       abortController = new AbortController();
       
       const detectionPromise = (async () => {
         try {
-          for await (const chunk of codeReviewAIService.streamChat(messageHistory)) {
-            // 🔍 定期检查耗时
-            const elapsed = Date.now() - startTime;
-            if (elapsed > 30000 && elapsed % 10000 < 100) { // 每10秒记录一次（超过30秒后）
-              console.log(`⏱️ AI 响应进行中: ${Math.floor(elapsed / 1000)}秒, 已接收 ${responseContent.length} 字符`);
-            }
-            
-            // chunk is an object with {content, done, fullText}
-            if (chunk.content) {
-              responseContent += chunk.content;
-            }
-            // If stream is done, use fullText as final result
-            if (chunk.done && chunk.fullText) {
-              responseContent = chunk.fullText;
-            }
-          }
+          // Use non-streaming chat method
+          const result = await codeReviewAIService.adapter.chat(messageHistory, {
+            signal: abortController.signal
+          });
           
-          const totalTime = Date.now() - startTime;
-          console.log(`✅ AI 响应完成，总耗时: ${Math.floor(totalTime / 1000)}秒`);
+          responseContent = result.content || result.fullText || '';
+          tokenUsage = result.usage;
           
           return responseContent;
         } catch (streamError) {
-          // Stream aborted or error
-          console.error('Stream error during detection:', streamError);
+          console.error('Error during detection:', streamError);
           throw streamError;
         }
       })();
@@ -380,6 +390,9 @@ Please detect defects according to the specified categories and output the resul
         clearTimeout(timeoutId);
       }
       
+      const totalTime = Date.now() - detectionStartTime;
+      console.log(`✅ AI 响应完成，总耗时: ${Math.floor(totalTime / 1000)}秒`);
+      
       console.log('\n' + '📊'.repeat(40));
       console.log('✅ AI Response Received:');
       console.log('  - Total length:', responseContent.length, 'characters');
@@ -389,12 +402,40 @@ Please detect defects according to the specified categories and output the resul
       
       serverLog?.info(`AI响应内容: ${responseContent.substring(0, 500)}...`);
       serverLog?.info(`AI响应总长度: ${responseContent.length} 字符`);
+      
+      // 🔧 成功时记录token统计
+      recordTokenStatisticsOnSuccess(
+        fileInfo,
+        tokenUsage,
+        systemPrompt,
+        userMessage,
+        responseContent,
+        moduleName,
+        totalTime,
+        lineStats
+      );
+      
     } catch (error) {
+      detectionError = error;
+      const totalTime = Date.now() - detectionStartTime;
+      
       if (error instanceof Error && error.message === 'AI检测超时') {
         serverLog?.error(`文件 ${fileInfo.name} 检测超时（超过${timeout/1000}秒），跳过此文件`);
       } else {
         serverLog?.error(`文件 ${fileInfo.name} 检测出错:`, error);
       }
+      
+      // 🔧 失败时也记录token统计（使用估算）
+      recordTokenStatisticsOnFailure(
+        fileInfo,
+        detectionStartTime,
+        error.message,
+        systemPrompt,
+        userMessage,
+        moduleName,
+        lineStats
+      );
+      
       // Abort stream
       abortController?.abort();
       // Clear timeout timer
@@ -412,7 +453,149 @@ Please detect defects according to the specified categories and output the resul
 
   } catch (error) {
     serverLog?.error(`检测文件 ${fileInfo.path} 时发生错误:`, error);
+    
+    // 🔧 最外层错误也记录token统计
+    recordTokenStatisticsOnFailure(
+      fileInfo,
+      detectionStartTime,
+      error.message || 'unknown_error',
+      systemPrompt,
+      userMessage,
+      moduleName,
+      lineStats
+    );
+    
     return [];
+  }
+}
+
+/**
+ * 🔧 计算行数统计的辅助函数
+ * @param {string} content - 文件内容
+ * @returns {Object} - 行数统计
+ */
+function calculateLineStatistics(content) {
+  if (!content) {
+    return { totalLines: 0, codeLines: 0, commentLines: 0 };
+  }
+  
+  const lines = content.split('\n');
+  const lineStats = {
+    totalLines: lines.length,
+    codeLines: 0,
+    commentLines: 0
+  };
+  
+  let inBlockComment = false;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // 空行不计入代码行或注释行
+    if (!trimmed) continue;
+    
+    // 检查块注释
+    if (trimmed.includes('/*')) inBlockComment = true;
+    if (trimmed.includes('*/')) {
+      inBlockComment = false;
+      lineStats.commentLines++;
+      continue;
+    }
+    
+    // 统计行类型
+    if (inBlockComment) {
+      lineStats.commentLines++;
+    } else if (trimmed.startsWith('//') || trimmed.startsWith('#')) {
+      lineStats.commentLines++;
+    } else {
+      lineStats.codeLines++;
+    }
+  }
+  
+  return lineStats;
+}
+
+/**
+ * 🔧 成功时记录token统计
+ */
+function recordTokenStatisticsOnSuccess(
+  fileInfo,
+  tokenUsage,
+  systemPrompt,
+  userMessage,
+  responseContent,
+  moduleName,
+  totalTime,
+  lineStats
+) {
+  try {
+    if (tokenUsage && tokenUsage.total_tokens) {
+      // 有实际的token数据
+      tokenStatisticsService.recordFileTokens(
+        fileInfo.name,
+        fileInfo.path,
+        tokenUsage,
+        '',
+        '',
+        moduleName,
+        totalTime,
+        lineStats
+      );
+      console.log(`📊 Token统计已记录（实际数据）: ${fileInfo.name}`);
+    } else {
+      // 使用估算
+      console.warn('⚠️ No token usage data received for file:', fileInfo.name);
+      const promptText = systemPrompt + userMessage;
+      tokenStatisticsService.recordFileTokens(
+        fileInfo.name,
+        fileInfo.path,
+        null,
+        promptText,
+        responseContent,
+        moduleName,
+        totalTime,
+        lineStats
+      );
+      console.log(`📊 Token统计已记录（估算数据）: ${fileInfo.name}`);
+    }
+  } catch (error) {
+    console.error('❌ 记录token统计失败:', error);
+  }
+}
+
+/**
+ * 🔧 失败时记录token统计（使用估算）
+ */
+function recordTokenStatisticsOnFailure(
+  fileInfo,
+  startTime,
+  errorMessage,
+  systemPrompt = '',
+  userMessage = '',
+  moduleName = 'root',
+  lineStats = null
+) {
+  try {
+    const totalTime = Date.now() - startTime;
+    const promptText = systemPrompt + userMessage;
+    
+    // 如果没有行数统计，使用默认值
+    const safeLineStats = lineStats || { totalLines: 0, codeLines: 0, commentLines: 0 };
+    
+    tokenStatisticsService.recordFileTokens(
+      fileInfo.name,
+      fileInfo.path,
+      null, // 没有实际token数据
+      promptText,
+      '', // 没有响应内容
+      moduleName,
+      totalTime,
+      safeLineStats
+    );
+    
+    console.log(`📊 Token统计已记录（失败/估算）: ${fileInfo.name}, 原因: ${errorMessage}`);
+  } catch (error) {
+    console.error('❌ 记录失败token统计时出错:', error);
   }
 }
 

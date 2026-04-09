@@ -145,13 +145,13 @@ export default function StatusPanel({ status, onStart, onStop }) {
               <p className="text-sm font-medium text-theme-text-primary">
                 {t("autodetection.status.progress", "进度")}
               </p>
-              <p className="text-sm font-semibold text-theme-accent-primary">
-                {t("autodetection.status.progressFiles", "Files")}: {status.progress.processedFiles || 0}/{status.progress.totalFiles || 0}
+              <p className="text-sm font-semibold text-theme-text-primary">
+                {t("autodetection.status.progressFiles", "文件")}: {status.progress.processedFiles || 0}/{status.progress.totalFiles || 0}
               </p>
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
               <div
-                className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+                className="bg-blue-600 dark:bg-blue-500 h-3 rounded-full transition-all duration-300"
                 style={{
                   width: `${
                     status.progress.totalFiles > 0
