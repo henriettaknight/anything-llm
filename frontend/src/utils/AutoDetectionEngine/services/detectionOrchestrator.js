@@ -222,39 +222,14 @@ class DetectionOrchestratorImpl {
         const groupResult = await this.processGroup(
           group,
           directoryHandle,
-          onReportGenerated,
+          null,  // 不传递 onReportGenerated，避免在分组完成时生成报告
           this.currentSession.id  // 传递 sessionId
         );
         
         allResults.push(groupResult);
         
-        // 立即生成并保存该分组的报告
-        if (onReportGenerated) {
-          const groupReport = {
-            groupName: group.name,
-            groupPath: group.path,
-            filesScanned: group.files.length,
-            defectsFound: 0,  // 从 groupResult 中计算
-            batches: groupResult.batches,
-            sessionId: this.currentSession.id,
-            timestamp: Date.now(),
-            createdAt: new Date().toISOString(),
-            status: 'completed'
-          };
-          
-          // 计算缺陷数
-          const batchResults = (groupResult.batches || []).flatMap(batch => batch.results || []);
-          groupReport.defectsFound = batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0);
-          groupReport.defects = batchResults.flatMap(r => r.defects || []);
-          groupReport.results = batchResults.map(r => ({
-            file: r.filePath || r.file?.path,
-            filePath: r.filePath || r.file?.path,
-            defects: r.defects || []
-          }));
-          
-          console.log(`✅ 分组 ${group.name} 检测完成，立即生成报告`);
-          onReportGenerated(groupReport);
-        }
+        console.log(`✅ 分组 ${group.name} 检测完成`);
+        // 注意：报告生成已延迟到最后统一处理，避免重复生成
       }
 
       // Process root files if any
@@ -273,38 +248,13 @@ class DetectionOrchestratorImpl {
         const rootResult = await this.processGroup(
           { name: 'root', path: '.', files: rootFiles },
           directoryHandle,
-          onReportGenerated,
+          null,  // 不传递 onReportGenerated，避免在根目录文件完成时生成报告
           this.currentSession.id  // 传递 sessionId
         );
         allResults.push(rootResult);
         
-        // 立即生成并保存根目录文件的报告
-        if (onReportGenerated) {
-          const groupReport = {
-            groupName: 'root',
-            groupPath: '.',
-            filesScanned: rootFiles.length,
-            defectsFound: 0,  // 从 rootResult 中计算
-            batches: rootResult.batches,
-            sessionId: this.currentSession.id,
-            timestamp: Date.now(),
-            createdAt: new Date().toISOString(),
-            status: 'completed'
-          };
-          
-          // 计算缺陷数
-          const batchResults = (rootResult.batches || []).flatMap(batch => batch.results || []);
-          groupReport.defectsFound = batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0);
-          groupReport.defects = batchResults.flatMap(r => r.defects || []);
-          groupReport.results = batchResults.map(r => ({
-            file: r.filePath || r.file?.path,
-            filePath: r.filePath || r.file?.path,
-            defects: r.defects || []
-          }));
-          
-          console.log(`✅ 根目录文件检测完成，立即生成报告`);
-          onReportGenerated(groupReport);
-        }
+        console.log(`✅ 根目录文件检测完成`);
+        // 注意：报告生成已延迟到最后统一处理，避免重复生成
       }
 
       // Step 3: Complete session
@@ -399,6 +349,51 @@ class DetectionOrchestratorImpl {
       });
       
       console.log('✅ ZIP package generated and downloaded successfully');
+      
+      // 🔧 调用 onReportGenerated 回调，保存报告到 localStorage（报告区）
+      if (onReportGenerated) {
+        console.log('📝 Saving unified report to localStorage...');
+        
+        // 合并所有分组的报告数据
+        const allDefects = [];
+        const allFileResults = [];
+        let totalFilesScanned = 0;
+        
+        for (const result of allResults) {
+          const batchResults = (result.batches || []).flatMap(batch => batch.results || []);
+          totalFilesScanned += batchResults.length;
+          
+          batchResults.forEach(r => {
+            if (r.defects && r.defects.length > 0) {
+              allDefects.push(...r.defects);
+            }
+            allFileResults.push({
+              file: r.filePath || r.file?.path,
+              filePath: r.filePath || r.file?.path,
+              defects: r.defects || []
+            });
+          });
+        }
+        
+        // 创建统一的报告对象
+        const unifiedReport = {
+          groupName: 'all',  // 使用 'all' 表示这是所有分组的统一报告
+          groupPath: '.',
+          filesScanned: totalFilesScanned,
+          defectsFound: allDefects.length,
+          batches: allResults.flatMap(r => r.batches || []),
+          sessionId: this.currentSession.id,
+          timestamp: Date.now(),
+          createdAt: new Date().toISOString(),
+          status: 'completed',
+          defects: allDefects,
+          results: allFileResults
+        };
+        
+        // 调用回调保存到 localStorage
+        onReportGenerated(unifiedReport);
+        console.log('✅ Unified report saved to localStorage');
+      }
       
       // Transform allResults to groups format for report generation
       const groupResults = allResults.map(result => {
@@ -883,7 +878,7 @@ class DetectionOrchestratorImpl {
         await this.processGroup(
           group,
           options.directoryHandle,
-          options.onReportGenerated
+          null  // 不传递 onReportGenerated，避免重复生成
         );
       }
 
@@ -893,36 +888,8 @@ class DetectionOrchestratorImpl {
         const rootResult = await this.processGroup(
           { name: 'root', path: '.', files: remainingRootFiles },
           options.directoryHandle,
-          options.onReportGenerated
+          null  // 不传递 onReportGenerated，避免重复生成
         );
-        
-        // 立即生成并保存根目录文件的报告
-        if (options.onReportGenerated) {
-          const groupReport = {
-            groupName: 'root',
-            groupPath: '.',
-            filesScanned: remainingRootFiles.length,
-            defectsFound: 0,  // 从 rootResult 中计算
-            batches: rootResult.batches,
-            sessionId: sessionId,
-            timestamp: Date.now(),
-            createdAt: new Date().toISOString(),
-            status: 'completed'
-          };
-          
-          // 计算缺陷数
-          const batchResults = (rootResult.batches || []).flatMap(batch => batch.results || []);
-          groupReport.defectsFound = batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0);
-          groupReport.defects = batchResults.flatMap(r => r.defects || []);
-          groupReport.results = batchResults.map(r => ({
-            file: r.filePath || r.file?.path,
-            filePath: r.filePath || r.file?.path,
-            defects: r.defects || []
-          }));
-          
-          console.log(`✅ 根目录文件检测完成，立即生成报告`);
-          options.onReportGenerated(groupReport);
-        }
       }
 
       // Complete session

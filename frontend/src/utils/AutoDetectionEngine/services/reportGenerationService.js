@@ -791,12 +791,21 @@ class ReportGenerationServiceImpl {
       
       console.log(`📦 [reportGenerationService.downloadReport] HTML 报告生成完成`);
       
+      // Generate file name using report's original timestamp
+      const reportTimestamp = new Date(report.timestamp || report.createdAt || Date.now()).toISOString()
+        .replace(/[:.]/g, '-')
+        .replace('T', '_')
+        .substring(0, 19);
+      const fileName = `report_${reportTimestamp}`;
+      
       // Package and download as ZIP
       console.log(`📦 [reportGenerationService.downloadReport] 调用 zipPackageService.packageAndDownload...`);
+      console.log(`📦 [reportGenerationService.downloadReport] 文件名: ${fileName}.zip`);
       await zipPackageService.packageAndDownload({
         defectReports,
         tokenStatistics,
-        htmlReport
+        htmlReport,
+        fileName
       });
       
       console.log(`✅ [reportGenerationService.downloadReport] ZIP 包下载完成`);
