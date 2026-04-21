@@ -398,9 +398,12 @@ Please detect defects according to the specified categories and output the resul
       console.log('  - Total length:', responseContent.length, 'characters');
       console.log('  - First 800 chars:', responseContent.substring(0, 800));
       console.log('  - Last 300 chars:', responseContent.substring(responseContent.length - 300));
-      console.log('📊'.repeat(40) + '\n');
+      console.log('📊'.repeat(40));
+      console.log('🧾 FULL AI RESPONSE START');
+      console.log(responseContent);
+      console.log('🧾 FULL AI RESPONSE END\n');
       
-      serverLog?.info(`AI响应内容: ${responseContent.substring(0, 500)}...`);
+      serverLog?.info(`AI响应内容(完整):\n${responseContent}`);
       serverLog?.info(`AI响应总长度: ${responseContent.length} 字符`);
       
       // 🔧 成功时记录token统计
@@ -722,9 +725,19 @@ function parseDefectDetectionResults(response, filePath) {
     serverLog?.info(`成功解析 ${listDefects.length} 个列表格式缺陷`);
     return listDefects;
   }
+
+  console.log('  🔍 Trying structured markdown format...');
+  // 4. Try markdown issue sections (#### A. ...)
+  const markdownDefects = parseStructuredMarkdownDefects(response, filePath);
+  if (markdownDefects.length > 0) {
+    console.log(`  ✅ Successfully parsed ${markdownDefects.length} defects from markdown format`);
+    console.log('🔧'.repeat(40) + '\n');
+    serverLog?.info(`成功解析 ${markdownDefects.length} 个Markdown结构化缺陷`);
+    return markdownDefects;
+  }
   
   console.log('  🔍 Trying loose format matching...');
-  // 4. If standard format parsing fails, try relaxed text matching
+  // 5. If standard format parsing fails, try relaxed text matching
   const looseDefects = parseLooseFormatDefects(response, filePath);
   if (looseDefects.length > 0) {
     console.log(`  ✅ Successfully parsed ${looseDefects.length} defects from loose format`);
@@ -914,6 +927,83 @@ function parseListFormatDefects(response, filePath) {
  * @param {string[]} values - Values to check
  * @returns {boolean} - True if any value is placeholder
  */
+function mapMarkdownIssueToCategory(title = '', content = '') {
+  const text = `${title} ${content}`.toLowerCase();
+
+  if (/uninitiali[sz]ed|未初始化|未赋值/.test(text)) return 'AUTO';
+  if (/array|out of bounds|越界|下标/.test(text)) return 'ARRAY';
+  if (/memory leak|leak|泄漏/.test(text)) return 'LEAK';
+  if (/null pointer|dereference|null|空指针|野指针/.test(text)) return 'MEMF';
+  if (/resource|句柄|fd|socket|资源/.test(text)) return 'OSRES';
+  if (/stl|vector|map|unordered/.test(text)) return 'STL';
+  if (/deprecat|废弃/.test(text)) return 'DEPR';
+  if (/performance|perf|slow|低效|性能/.test(text)) return 'PERF';
+
+  return 'CLASS';
+}
+
+function parseStructuredMarkdownDefects(response, filePath) {
+  const defects = [];
+
+  // Match sections like: #### A. Memory Leak / Resource Management
+  const issueHeaderRegex = /^####\s*(?:[A-Z]\.)?\s*(.+)$/gim;
+  const headers = Array.from(response.matchAll(issueHeaderRegex));
+
+  if (!headers.length) {
+    return defects;
+  }
+
+  for (let i = 0; i < headers.length; i++) {
+    const fullMatch = headers[i][0];
+    const title = (headers[i][1] || '').trim();
+    const start = headers[i].index + fullMatch.length;
+    const end = i + 1 < headers.length ? headers[i + 1].index : response.length;
+    const block = response.slice(start, end).trim();
+
+    if (!block || /no defects found|未发现缺陷|没有发现缺陷/i.test(block)) {
+      continue;
+    }
+
+    const locationMatch = block.match(/(?:\*\s*)?\*\*?(?:Location|位置)\*\*?\s*:\s*`?([^`\n]+)`?/i);
+    const riskMatch = block.match(/(?:\*\s*)?\*\*?(?:Risk|严重程度|风险)\*\*?\s*:\s*([^\n]+)/i);
+    const lineMatch = block.match(/L\d+(?:\s*[-–]\s*L?\d+)?/i);
+    const codeMatch = block.match(/`([^`]{2,200})`/);
+
+    // Description: first non-empty non-bullet line
+    const description = (block.split('\n').map(line => line.trim()).find(line => line && !line.startsWith('*')) || title).slice(0, 400);
+
+    const category = mapMarkdownIssueToCategory(title, block);
+    const riskRaw = (riskMatch?.[1] || 'Medium').trim();
+    const risk = /high|严重|高/i.test(riskRaw)
+      ? 'high'
+      : /low|低/i.test(riskRaw)
+        ? 'low'
+        : 'medium';
+
+    const lines = lineMatch ? lineMatch[0].replace(/\s+/g, '') : '';
+    const functionOrLocation = (locationMatch?.[1] || '').trim();
+    const snippet = (codeMatch?.[1] || title).trim();
+
+    if (isPlaceholderContent([title, description, snippet])) {
+      continue;
+    }
+
+    defects.push({
+      category,
+      file: filePath,
+      function: functionOrLocation,
+      snippet,
+      lines,
+      risk,
+      howToTrigger: `${title} - ${description}`,
+      suggestedFix: `请按“${title}”问题修复，并补充边界与空值防护。`,
+      confidence: /high|严重|高/i.test(riskRaw) ? 'High' : /low|低/i.test(riskRaw) ? 'Low' : 'Medium'
+    });
+  }
+
+  return defects;
+}
+
 function isPlaceholderContent(values) {
   const placeholders = ['----------', '-------', '------', '-----------------', '--------------', '-', ''];
   return values.some(value => placeholders.includes(value) || value.includes('---'));

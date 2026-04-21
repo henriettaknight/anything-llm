@@ -89,9 +89,16 @@ export class DirectAIAdapter {
       
       // Use backend proxy to avoid CORS and Mixed Content issues
       const useProxy = window.location.protocol === 'https:' && this.url.startsWith('http://');
+      
+      // Determine the correct API endpoint based on model/service
+      let apiEndpoint = '/v1/chat/completions'; // Default for vLLM
+      if (this.model && (this.model.includes('gemma') || this.model.includes('ollama'))) {
+        apiEndpoint = '/api/chat'; // Ollama endpoint
+      }
+      
       const fullUrl = useProxy 
         ? '/api/direct-ai-proxy'
-        : `${this.url}/v1/chat/completions`;
+        : `${this.url}${apiEndpoint}`;
       
       console.log('\n🌐 Sending HTTP Request:');
       console.log('  - URL:', fullUrl);
@@ -103,7 +110,7 @@ export class DirectAIAdapter {
       const requestStartTime = Date.now();
       
       const requestPayload = useProxy ? {
-        url: `${this.url}/v1/chat/completions`,
+        url: `${this.url}${apiEndpoint}`,
         body: requestBody
       } : requestBody;
       
@@ -133,15 +140,26 @@ export class DirectAIAdapter {
       console.log('\n✅ Response OK, parsing JSON...');
 
       const data = await response.json();
-      
-      const content = data.choices?.[0]?.message?.content || '';
-      const usage = data.usage || null;
-      
+
+      // 验证A：打印原始响应结构，确认是否存在 Ollama 格式字段
+      console.log('\n🔍 Raw response diagnostics:');
+      console.log('  - Top-level keys:', Object.keys(data || {}));
+      console.log('  - Has choices[0].message.content:', !!data?.choices?.[0]?.message?.content);
+      console.log('  - Has message.content (Ollama):', !!data?.message?.content);
+      console.log('  - choices[0].message.content preview:', (data?.choices?.[0]?.message?.content || '').substring(0, 200));
+      console.log('  - message.content preview:', (data?.message?.content || '').substring(0, 200));
+      console.log('  - usage:', data?.usage || null);
+      console.log('  - prompt_eval_count:', data?.prompt_eval_count ?? null);
+      console.log('  - eval_count:', data?.eval_count ?? null);
+
+      const content = this._extractContentFromPayload(data);
+      const usage = this._extractUsageFromPayload(data);
+
       console.log('\n✅ Response parsed:');
       console.log('  - Content length:', content.length);
       console.log('  - First 500 chars:', content.substring(0, 500));
       console.log('  - Last 200 chars:', content.substring(content.length - 200));
-      
+
       if (usage) {
         console.log('  - Token usage:', JSON.stringify(usage));
       } else {
@@ -225,9 +243,16 @@ export class DirectAIAdapter {
       
       // Use backend proxy to avoid CORS and Mixed Content issues
       const useProxy = window.location.protocol === 'https:' && this.url.startsWith('http://');
+      
+      // Determine the correct API endpoint based on model/service
+      let apiEndpoint = '/v1/chat/completions'; // Default for vLLM
+      if (this.model && (this.model.includes('gemma') || this.model.includes('ollama'))) {
+        apiEndpoint = '/api/chat'; // Ollama endpoint
+      }
+      
       const fullUrl = useProxy 
         ? '/api/direct-ai-proxy'
-        : `${this.url}/v1/chat/completions`;
+        : `${this.url}${apiEndpoint}`;
       
       console.log('\n🌐 Sending HTTP Request:');
       console.log('  - URL:', fullUrl);
@@ -376,6 +401,67 @@ export class DirectAIAdapter {
       console.error('❌ DirectAIAdapter error:', error);
       throw error;
     }
+  }
+
+  /**
+   * 从 OpenAI/vLLM/Ollama 的响应中提取文本内容
+   * @private
+   */
+  _extractContentFromPayload(payload) {
+    if (!payload || typeof payload !== 'object') return '';
+
+    // OpenAI/vLLM non-streaming
+    if (payload.choices?.[0]?.message?.content) {
+      return payload.choices[0].message.content;
+    }
+
+    // OpenAI/vLLM streaming delta
+    if (payload.choices?.[0]?.delta?.content) {
+      return payload.choices[0].delta.content;
+    }
+
+    // Ollama chat response
+    if (payload.message?.content) {
+      return payload.message.content;
+    }
+
+    // 某些实现可能使用 response/content 直出
+    if (typeof payload.response === 'string') {
+      return payload.response;
+    }
+    if (typeof payload.content === 'string') {
+      return payload.content;
+    }
+
+    return '';
+  }
+
+  /**
+   * 从 OpenAI/vLLM/Ollama 的响应中提取 token 统计
+   * @private
+   */
+  _extractUsageFromPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+
+    // OpenAI/vLLM usage
+    if (payload.usage && typeof payload.usage === 'object') {
+      return payload.usage;
+    }
+
+    // Ollama usage 字段
+    const promptTokens = payload.prompt_eval_count;
+    const completionTokens = payload.eval_count;
+    if (typeof promptTokens === 'number' || typeof completionTokens === 'number') {
+      const p = typeof promptTokens === 'number' ? promptTokens : 0;
+      const c = typeof completionTokens === 'number' ? completionTokens : 0;
+      return {
+        prompt_tokens: p,
+        completion_tokens: c,
+        total_tokens: p + c
+      };
+    }
+
+    return null;
   }
 }
 

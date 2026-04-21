@@ -246,7 +246,21 @@ class DetectionService {
         },
         onStatusChange: (status) => {
           console.log('Status changed to:', status);
-          // Don't call completeDetection here, let the main flow handle it
+          
+          // 当检测完成时，更新前端状态为 'completed'
+          if (status === 'completed') {
+            console.log('✅ Detection completed, updating UI status');
+            this.updateStatus({
+              status: 'completed',
+              error: null
+            });
+            
+            // 延迟 2 秒后改为 idle，给 UI 时间显示完成状态
+            setTimeout(() => {
+              console.log('⏱️ Transitioning from completed to idle');
+              this.updateStatus({ status: 'idle' });
+            }, 2000);
+          }
         },
         onReportGenerated: this.onReportGeneratedCallback  // 传递回调
       });
@@ -277,21 +291,39 @@ class DetectionService {
         
         if (session) {
           const allDefects = [];
-          if (session.detectionResults) {
-            session.detectionResults.forEach(fileResult => {
-              if (fileResult.defects && fileResult.defects.length > 0) {
-                allDefects.push(...fileResult.defects);
-              }
-            });
+
+          // 兼容两种会话结构：
+          // 1) 旧结构：session.detectionResults
+          // 2) 新结构：session.groups[].results[]
+          let normalizedDetectionResults = [];
+
+          if (Array.isArray(session.detectionResults) && session.detectionResults.length > 0) {
+            normalizedDetectionResults = session.detectionResults;
+          } else if (Array.isArray(session.groups) && session.groups.length > 0) {
+            normalizedDetectionResults = session.groups.flatMap(group => Array.isArray(group.results) ? group.results : []);
           }
-          
+
+          normalizedDetectionResults.forEach(fileResult => {
+            if (fileResult.defects && fileResult.defects.length > 0) {
+              allDefects.push(...fileResult.defects);
+            }
+          });
+
+          const traceId = session.id || session.sessionId || 'unknown-session';
+          const filesWithDefects = normalizedDetectionResults.filter(fileResult =>
+            Array.isArray(fileResult.defects) && fileResult.defects.length > 0
+          ).length;
+
+          console.log(
+            `🔗 [DEFECT_PIPELINE][${traceId}] stage=frontend-summary files=${normalizedDetectionResults.length} filesWithDefects=${filesWithDefects} defects=${allDefects.length}`
+          );
           console.log('Total defects found:', allDefects.length);
           
           // Pass the entire session object to completeDetection
           this.completeDetection({
             filesScanned: session.progress?.totalFiles || this.currentStatus.progress.total,
             defectsFound: allDefects.length,
-            detectionResults: session.detectionResults || [],
+            detectionResults: normalizedDetectionResults,
             session: session  // 传递完整的 session 对象，包含 groups 数据
           });
         } else {

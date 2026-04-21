@@ -440,7 +440,12 @@ class ReportGenerationServiceImpl {
     ];
     
     let csv = headers.join(',') + '\n';
-    
+
+    const traceId = report.sessionId || report.id || 'unknown-session';
+    console.log(
+      `🔗 [DEFECT_PIPELINE][${traceId}] stage=csv-export-start group=${report.groupName || 'root'} fileResults=${report.fileResults?.length || 0} totalDefects=${report.totalDefects || 0}`
+    );
+
     // Collect all valid defects
     let defectIndex = 1;
     for (const fileResult of report.fileResults) {
@@ -533,8 +538,12 @@ class ReportGenerationServiceImpl {
       }
     }
     
-    console.log(`[DEBUG exportReportAsCSV] 生成的 CSV 行数: ${csv.split('\n').length - 1}, 缺陷数: ${defectIndex - 1}`);
-    
+    const csvRows = csv.split('\n').length - 1;
+    console.log(`[DEBUG exportReportAsCSV] 生成的 CSV 行数: ${csvRows}, 缺陷数: ${defectIndex - 1}`);
+    console.log(
+      `🔗 [DEFECT_PIPELINE][${traceId}] stage=csv-export-done group=${report.groupName || 'root'} csvRows=${csvRows} defects=${defectIndex - 1}`
+    );
+
     return csv;
   }
 
