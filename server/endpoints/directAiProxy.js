@@ -1,14 +1,14 @@
 /**
  * Direct AI Proxy Endpoint
- * Proxies requests from frontend to vLLM to avoid CORS and Mixed Content issues
+ * Proxies requests from frontend to vLLM or Ollama to avoid CORS and Mixed Content issues
  */
 
 function directAiProxyEndpoints(app) {
   if (!app) return;
 
   /**
-   * Proxy streaming chat requests to vLLM
-   * This allows HTTPS frontend to communicate with HTTP vLLM backend
+   * Proxy streaming chat requests to vLLM or Ollama
+   * This allows HTTPS frontend to communicate with HTTP backend
    * Note: This endpoint requires authentication
    */
   app.post(
@@ -26,20 +26,48 @@ function directAiProxyEndpoints(app) {
         console.log('[DirectAIProxy] Proxying request to:', url);
         console.log('[DirectAIProxy] Request body:', JSON.stringify(body).substring(0, 200));
 
-        // Forward the request to vLLM
-        const vllmResponse = await fetch(url, {
+        // Detect if this is Ollama based on model name instead of URL
+        const isOllama = body.model && (
+          body.model.includes('gemma') || 
+          body.model.includes('ollama') ||
+          body.model.includes('llama') ||
+          body.model.includes('mistral')
+        );
+        
+        // Determine the correct URL based on model type
+        let targetUrl = url;
+        let transformedBody = body;
+        
+        if (isOllama) {
+          // Convert OpenAI format URL to Ollama format
+          targetUrl = url.replace('/v1/chat/completions', '/api/chat');
+          console.log('[DirectAIProxy] Detected Ollama model, converting URL to:', targetUrl);
+          
+          // Ollama uses different format
+          transformedBody = {
+            model: body.model,
+            messages: body.messages,
+            stream: body.stream !== false,
+            temperature: body.temperature || 0.7
+          };
+          console.log('[DirectAIProxy] Transformed to Ollama format');
+        }
+
+        // Forward the request to backend
+        const backendResponse = await fetch(targetUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify(transformedBody),
+          signal: AbortSignal.timeout(120000), // 120 秒超时
         });
 
-        if (!vllmResponse.ok) {
-          const errorText = await vllmResponse.text();
-          console.error('[DirectAIProxy] vLLM error:', vllmResponse.status, errorText);
-          return response.status(vllmResponse.status).json({
-            error: `vLLM error: ${vllmResponse.status} - ${errorText}`
+        if (!backendResponse.ok) {
+          const errorText = await backendResponse.text();
+          console.error('[DirectAIProxy] Backend error:', backendResponse.status, errorText);
+          return response.status(backendResponse.status).json({
+            error: `Backend error: ${backendResponse.status} - ${errorText}`
           });
         }
 
@@ -49,7 +77,7 @@ function directAiProxyEndpoints(app) {
         response.setHeader('Connection', 'keep-alive');
 
         // Stream the response back to the client
-        const reader = vllmResponse.body.getReader();
+        const reader = backendResponse.body.getReader();
         const decoder = new TextDecoder();
 
         try {
