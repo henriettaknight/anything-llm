@@ -27,12 +27,16 @@ function directAiProxyEndpoints(app) {
         console.log('[DirectAIProxy] Request body:', JSON.stringify(body).substring(0, 200));
 
         // Detect if this is Ollama based on model name instead of URL
-        const isOllama = body.model && (
-          body.model.includes('gemma') || 
+        // Also detect by port 11434 (default Ollama port)
+        const isOllamaPort = url && url.includes(':11434');
+        const isOllama = isOllamaPort || (body.model && (
+          body.model.includes('gemma') ||
           body.model.includes('ollama') ||
           body.model.includes('llama') ||
-          body.model.includes('mistral')
-        );
+          body.model.includes('mistral') ||
+          body.model.includes('qwen') ||
+          body.model.includes('phi')
+        ));
         
         // Determine the correct URL based on model type
         let targetUrl = url;
@@ -60,7 +64,7 @@ function directAiProxyEndpoints(app) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(transformedBody),
-          signal: AbortSignal.timeout(120000), // 120 秒超时
+          signal: AbortSignal.timeout(600000), // 600 秒超时（10分钟，适配大模型推理）
         });
 
         if (!backendResponse.ok) {
@@ -75,6 +79,10 @@ function directAiProxyEndpoints(app) {
         response.setHeader('Content-Type', 'text/event-stream');
         response.setHeader('Cache-Control', 'no-cache');
         response.setHeader('Connection', 'keep-alive');
+        // Tell nginx NOT to buffer this response - critical for streaming through reverse proxy
+        response.setHeader('X-Accel-Buffering', 'no');
+        // Flush headers immediately so nginx sees the streaming headers before any data arrives
+        response.flushHeaders();
 
         // Stream the response back to the client
         const reader = backendResponse.body.getReader();

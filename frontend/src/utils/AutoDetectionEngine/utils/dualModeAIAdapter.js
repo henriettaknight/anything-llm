@@ -332,10 +332,17 @@ export class DirectAIAdapter {
           buffer = lines.pop() || '';
 
           for (const line of lines) {
-            if (!line.trim() || !line.startsWith('data: ')) continue;
+            if (!line.trim()) continue;
 
-            const data = line.slice(6);
-            if (data === '[DONE]') {
+            // Support both OpenAI SSE format (data: {...}) and Ollama NDJSON format ({...})
+            let rawData;
+            if (line.startsWith('data: ')) {
+              rawData = line.slice(6);
+            } else {
+              rawData = line;
+            }
+
+            if (rawData === '[DONE]') {
               console.log('\n✓ Received [DONE] signal');
               if (tokenUsage) {
                 console.log('  - Final token usage:', JSON.stringify(tokenUsage));
@@ -351,30 +358,51 @@ export class DirectAIAdapter {
             }
 
             try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content || '';
-              
-              // 提取 token 使用信息（通常在最后一个 chunk 或有 finish_reason 的 chunk 中）
+              const parsed = JSON.parse(rawData);
+
+              // OpenAI/vLLM streaming: choices[0].delta.content
+              // Ollama streaming: message.content  (with done flag)
+              let content = parsed.choices?.[0]?.delta?.content || parsed.message?.content || '';
+
+              // Ollama signals end via done:true
+              if (parsed.done === true) {
+                // Collect Ollama token usage
+                if (typeof parsed.prompt_eval_count === 'number' || typeof parsed.eval_count === 'number') {
+                  const p = parsed.prompt_eval_count || 0;
+                  const c = parsed.eval_count || 0;
+                  tokenUsage = { prompt_tokens: p, completion_tokens: c, total_tokens: p + c };
+                  console.log('\n📊 Ollama token usage received:', JSON.stringify(tokenUsage));
+                }
+                yield {
+                  content: '',
+                  done: true,
+                  fullText: totalContent,
+                  usage: tokenUsage
+                };
+                return;
+              }
+
+              // 提取 OpenAI token 使用信息（通常在最后一个 chunk 或有 finish_reason 的 chunk 中）
               if (parsed.usage) {
                 tokenUsage = parsed.usage;
                 console.log('\n📊 Token usage received:', JSON.stringify(tokenUsage));
               }
-              
+
               if (content) {
                 chunkCount++;
                 totalContent += content;
-                
+
                 if (!firstChunkReceived) {
                   console.log('\n🎯 First chunk received:');
                   console.log('  - Content:', JSON.stringify(content));
                   console.log('  - Parsed structure:', JSON.stringify(parsed, null, 2));
                   firstChunkReceived = true;
                 }
-                
+
                 if (chunkCount % 50 === 0) {
                   console.log(`  📊 Progress: ${chunkCount} chunks, ${totalContent.length} chars`);
                 }
-                
+
                 // Yield in the same format as AIAdapter
                 yield {
                   content,

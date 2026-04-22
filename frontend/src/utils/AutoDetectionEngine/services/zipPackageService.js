@@ -18,7 +18,7 @@ class ZipPackageServiceImpl {
   /**
    * Package all reports and statistics into a ZIP file
    * @param {Object} options - Package options
-   * @param {Array<{groupName: string, csvContent: string}>} options.defectReports - Defect reports
+   * @param {Array<{groupName: string, xlsxBuffer: ArrayBuffer, defects: Array}>} options.defectReports - Defect reports
    * @param {string} options.tokenStatistics - Token statistics CSV content
    * @param {string} [options.htmlReport] - HTML summary report (optional)
    * @param {string} [options.fileName] - Custom file name (without extension)
@@ -45,16 +45,24 @@ class ZipPackageServiceImpl {
         const defectsFolder = zip.folder('defects');
         
         for (const report of defectReports) {
-          const csvFileName = `${report.groupName.toLowerCase()}.csv`;
-          defectsFolder.file(csvFileName, report.csvContent);
-          console.log(`  ✓ Added: defects/${csvFileName}`);
+          if (report.xlsxBuffer) {
+            // New path: xlsx binary
+            const xlsxFileName = `${report.groupName.toLowerCase()}.xlsx`;
+            defectsFolder.file(xlsxFileName, report.xlsxBuffer);
+            console.log(`  ✓ Added: defects/${xlsxFileName}`);
+          } else if (report.csvContent) {
+            // Legacy fallback
+            const csvFileName = `${report.groupName.toLowerCase()}.csv`;
+            defectsFolder.file(csvFileName, report.csvContent);
+            console.log(`  ✓ Added: defects/${csvFileName}`);
+          }
         }
       }
 
       // 2. Add token statistics to root
       if (tokenStatistics) {
-        zip.file('token_statistics.csv', tokenStatistics);
-        console.log('  ✓ Added: token_statistics.csv');
+        zip.file('token_statistics.xlsx', tokenStatistics);
+        console.log('  ✓ Added: token_statistics.xlsx');
       }
 
       // 3. Add HTML summary report to root (optional)
@@ -107,12 +115,18 @@ class ZipPackageServiceImpl {
     const totalFiles = defectReports.reduce((sum, r) => sum + (r.filesScanned || 0), 0);
     const totalDefects = defectReports.reduce((sum, r) => sum + (r.defectsFound || 0), 0);
     
-    // Calculate files with defects from CSV content
+    // Calculate files with defects from defects array (or fallback to csvContent parsing)
     let filesWithDefects = 0;
     const fileSet = new Set(); // 用于去重，避免同一文件被计算多次
     
     defectReports.forEach(report => {
-      if (report.csvContent) {
+      if (report.defects?.length) {
+        // New path: use structured defects array
+        report.defects.forEach(d => {
+          if (d._filePath) fileSet.add(d._filePath);
+        });
+      } else if (report.csvContent) {
+        // Legacy fallback: parse CSV
         const lines = report.csvContent.split('\n');
         // Skip header row
         for (let i = 1; i < lines.length; i++) {
@@ -134,14 +148,25 @@ class ZipPackageServiceImpl {
     // Calculate defect rate: (files with defects / total files) * 100
     const defectRate = totalFiles > 0 ? ((filesWithDefects / totalFiles) * 100).toFixed(1) : 0;
 
-    // Calculate defect type counts from CSV content
+    // Calculate defect type counts
     const defectTypeCounts = {};
     
     // Also calculate per-report defect types
     defectReports.forEach(report => {
       report.defectsByType = {}; // 初始化每个报告的缺陷类型统计
-      
-      if (report.csvContent) {
+
+      if (report.defects?.length) {
+        // New path: use structured defects array
+        report.defects.forEach(d => {
+          let category = d.type || '';
+          if (typeof category === 'object') category = category.zh || category.en || '';
+          category = String(category).toUpperCase();
+          if (!category) return;
+          defectTypeCounts[category] = (defectTypeCounts[category] || 0) + 1;
+          report.defectsByType[category] = (report.defectsByType[category] || 0) + 1;
+        });
+      } else if (report.csvContent) {
+        // Legacy fallback: parse CSV
         const lines = report.csvContent.split('\n');
         // Skip header row
         for (let i = 1; i < lines.length; i++) {

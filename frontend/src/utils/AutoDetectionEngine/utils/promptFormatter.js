@@ -41,7 +41,7 @@ export async function loadPromptTemplate(promptName = "ue5_cpp_prompt", language
       ? `${promptName}.md`
       : `${promptName}_en.md`;
     
-    console.log(`🌐 Loading prompt: ${promptFileName} (detected language: ${userLang})`);
+    console.log(`[PromptLoad] loading ${promptFileName} (lang=${userLang})`);
     
     // Try to load the language-specific prompt
     const response = await fetch(
@@ -50,7 +50,7 @@ export async function loadPromptTemplate(promptName = "ue5_cpp_prompt", language
     
     if (!response.ok) {
       // If language-specific prompt not found, try fallback to base prompt
-      console.warn(`Prompt file ${promptFileName} not found, trying fallback...`);
+      console.warn(`[PromptLoad] ${promptFileName} not found (${response.status}), trying fallback ${promptName}.md`);
       const fallbackResponse = await fetch(
         `/src/utils/AutoDetectionEngine/prompts/${promptName}.md`
       );
@@ -58,15 +58,20 @@ export async function loadPromptTemplate(promptName = "ue5_cpp_prompt", language
       if (!fallbackResponse.ok) {
         throw new Error(`Failed to load prompt template: ${fallbackResponse.statusText}`);
       }
-      
-      return await fallbackResponse.text();
+      const fallbackText = await fallbackResponse.text();
+      console.log(`[PromptLoad] fallback prompt loaded, length=${fallbackText.length}`);
+      return fallbackText;
     }
     
-    return await response.text();
+    const text = await response.text();
+    console.log(`[PromptLoad] prompt loaded, length=${text.length}`);
+    return text;
   } catch (error) {
-    console.error("Error loading prompt template:", error);
+    console.error("[PromptLoad] Error loading prompt template:", error);
     // Return a fallback basic prompt
-    return getDefaultPrompt();
+    const defaultPrompt = getDefaultPrompt();
+    console.warn(`[PromptLoad] using default prompt, length=${defaultPrompt.length}`);
+    return defaultPrompt;
   }
 }
 
@@ -84,22 +89,35 @@ function getDefaultPrompt() {
 - 输出一个高信噪比的缺陷报告，给出精准且最小化入侵的修复建议。
 
 ## 输出报告格式（请严格遵循）
-以Markdown表格输出，每条一行，字段如下：
-- No：1，2，3递增
-- Category: AUTO/ARRAY/MEMF/LEAK/OSRES/STL/DEPR/PERF/CLASS/COMPILE
-- File: 相对路径
-- Function/Symbol: 函数或符号名
-- Snippet: 简要代码关键行
-- Lines: 发现位置的行号或范围
-- Risk: 风险说明
-- HowToTrigger: 触发/重现条件
-- SuggestedFix: 最小化入侵修复建议
-- Confidence: High/Medium/Low
+以 JSON 数组输出，每条缺陷为一个对象，字段如下：
+- no: 序号，从1开始递增
+- category: AUTO/ARRAY/MEMF/LEAK/OSRES/STL/DEPR/PERF/CLASS/COMPILE
+- file: 相对路径
+- function: 函数或符号名
+- snippet: 简要代码关键行（1-3行，用 \\n 连接多行）
+- lines: 行号或范围（如 "L120" 或 "L118-L125"）
+- risk: 风险说明
+- howToTrigger: 触发/重现条件
+- suggestedFix: 最小化入侵修复建议
+- confidence: High/Medium/Low
 
-示例：
-| No | Category | File | Function/Symbol | Snippet | Lines | Risk | HowToTrigger | SuggestedFix | Confidence |
-|----|----------|------|-----------------|---------|-------|------|--------------|--------------|------------|
-| 1 | AUTO | Player/LyraPlayerState.cpp | ComputeRank_Helper | int32 Bonus; return Base + Bonus; | L123–L124 | 未初始化使用 | 直接调用时 | 为Bonus赋初值或分支全覆盖 | High |
+示例（仅输出 JSON 数组，不要输出其他文本）：
+```
+[
+  {
+    "no": 1,
+    "category": "AUTO",
+    "file": "Player/LyraPlayerState.cpp",
+    "function": "ComputeRank_Helper",
+    "snippet": "int32 Bonus; return Base + Bonus;",
+    "lines": "L123-L124",
+    "risk": "未初始化使用",
+    "howToTrigger": "直接调用时",
+    "suggestedFix": "为Bonus赋初值或分支全覆盖",
+    "confidence": "High"
+  }
+]
+```
 `;
 }
 
@@ -138,7 +156,7 @@ export async function formatDetectionPrompt(
 ${fileContent}
 \`\`\`
 
-请严格按照上述格式输出Markdown表格形式的缺陷报告。`
+请严格按照上述格式，仅输出 JSON 数组，不要输出 Markdown 表格或额外说明。`
     : `Please analyze the following code file and generate a defect report:
 
 File name: ${fileName}
@@ -148,7 +166,7 @@ Code content:
 ${fileContent}
 \`\`\`
 
-Please strictly follow the format above and output the defect report in Markdown table format.`;
+Please strictly follow the format above and output **only** a JSON array, with no Markdown tables or extra text.`;
 
   return [
     {
@@ -163,47 +181,88 @@ Please strictly follow the format above and output the defect report in Markdown
 }
 
 /**
- * Parse detection results from AI response (Markdown table format)
+ * Parse detection results from AI response (prefer JSON; fallback to Markdown table)
  * 
  * @param {string} response - The AI response text
  * @returns {Array<DetectionDefect>} - Parsed defects
  */
 export function parseDetectionResults(response) {
-  const defects = [];
+  const normalize = (val = '') => (val === undefined || val === null ? '' : String(val));
+  const mapItem = (item = {}) => ({
+    no: normalize(item.no ?? item.No ?? ''),
+    category: normalize(item.category ?? item.Category ?? ''),
+    file: normalize(item.file ?? item.File ?? ''),
+    function: normalize(item.function ?? item['function/symbol'] ?? item.functionSymbol ?? ''),
+    snippet: normalize(item.snippet ?? ''),
+    lines: normalize(item.lines ?? ''),
+    risk: normalize(item.risk ?? ''),
+    howToTrigger: normalize(item.howToTrigger ?? item.how_to_trigger ?? ''),
+    suggestedFix: normalize(item.suggestedFix ?? item.suggested_fix ?? item.suggestedfix ?? ''),
+    confidence: normalize(item.confidence ?? item.Confidence ?? 'Medium'),
+  });
 
   try {
-    // Find all table rows in the response
-    const lines = response.split("\n");
+    let text = (response || '').trim();
+
+    // Strip ```json code fences if present
+    const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (codeBlockMatch) {
+      text = codeBlockMatch[1].trim();
+    }
+
+    // Locate JSON array boundaries even if wrapped by extra text
+    const start = text.indexOf('[');
+    const end = text.lastIndexOf(']');
+    if (start !== -1 && end !== -1 && end > start) {
+      const jsonStr = text.slice(start, end + 1);
+      const parsed = JSON.parse(jsonStr);
+      if (Array.isArray(parsed)) {
+        const normalized = parsed.map(mapItem);
+        console.log(`Parsed ${normalized.length} defects from JSON response`);
+        const requiredFields = ['category','file','function','snippet','lines','risk','howToTrigger','suggestedFix','confidence'];
+        const missing = normalized.filter((d, idx) => requiredFields.some(f => !d[f]));
+        if (missing.length > 0) {
+          console.warn(`[DetectionValidation] ${missing.length} defects missing required fields; first sample:`, missing[0]);
+        }
+        return normalized;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to parse JSON detection results:', error);
+  }
+
+  // Fallback: attempt to parse legacy Markdown table to stay backward compatible
+  console.warn('Falling back to Markdown table parsing for detection results');
+  return parseMarkdownTable(response);
+}
+
+function parseMarkdownTable(response) {
+  const defects = [];
+  try {
+    const lines = (response || '').split('\n');
     let inTable = false;
     let headerPassed = false;
 
     for (const line of lines) {
       const trimmed = line.trim();
 
-      // Check if this is a table row
-      if (!trimmed.startsWith("|")) {
-        if (inTable) {
-          // End of table
-          break;
-        }
+      if (!trimmed.startsWith('|')) {
+        if (inTable) break;
         continue;
       }
 
-      // Start of table
       if (!inTable) {
         inTable = true;
-        continue; // Skip header row
+        continue; // skip header row
       }
 
-      // Skip separator row
       if (!headerPassed) {
         headerPassed = true;
-        continue;
+        continue; // skip separator row
       }
 
-      // Parse data row
       const cells = trimmed
-        .split("|")
+        .split('|')
         .map((cell) => cell.trim())
         .filter((cell) => cell);
 
@@ -222,13 +281,9 @@ export function parseDetectionResults(response) {
         });
       }
     }
-
-    console.log(`Parsed ${defects.length} defects from AI response`);
   } catch (error) {
-    console.error("Failed to parse detection results:", error);
-    throw new Error(`Failed to parse AI response: ${error.message}`);
+    console.error('Failed to parse markdown table detection results:', error);
   }
-
   return defects;
 }
 

@@ -3,6 +3,7 @@
  * Handles report creation, export, and management with i18n support
  */
 
+import * as XLSX from 'xlsx';
 import ReportStorage from '../storage/reportStorage.js';
 import { createTranslationService } from './translationService.js';
 import { detectUserLanguage, needsTranslation } from '../utils/languageDetector.js';
@@ -425,6 +426,10 @@ class ReportGenerationServiceImpl {
       sampleFileResult: report.fileResults?.[0]
     });
     
+    // Use Tab as separator - Excel auto-detects TSV and never misparses tabs inside field values.
+    // This avoids all comma/semicolon/quote ambiguity that caused column misalignment.
+    const SEP = '\t';
+    
     // CSV headers (according to 提示词.md table format)
     const headers = [
       'No',
@@ -439,7 +444,10 @@ class ReportGenerationServiceImpl {
       'Confidence'
     ];
     
-    let csv = headers.join(',') + '\n';
+    // "sep=\t" is an Excel-specific directive that tells Excel to use Tab as the
+    // column separator when opening a .csv file by double-clicking.
+    // It must be the very first line (before BOM or headers).
+    let csv = 'sep=\t\n' + headers.join(SEP) + '\n';
 
     const traceId = report.sessionId || report.id || 'unknown-session';
     console.log(
@@ -475,27 +483,30 @@ class ReportGenerationServiceImpl {
             }
             
             // No translation needed - use original AI output
-            risk = this.escapeCSV(defectRisk);
-            howToTrigger = this.escapeCSV(defectHowToTrigger);
+            risk = this.escapeTSV(defectRisk);
+            howToTrigger = this.escapeTSV(defectHowToTrigger);
           } else {
             // Fallback: split from description
             const descriptionParts = defect.description.split(' - ');
-            risk = this.escapeCSV(descriptionParts[0] || '');
-            howToTrigger = this.escapeCSV(descriptionParts.slice(1).join(' - ') || '');
+            risk = this.escapeTSV(descriptionParts[0] || '');
+            howToTrigger = this.escapeTSV(descriptionParts.slice(1).join(' - ') || '');
           }
           
           // Use original functionSymbol or extract from code
-          const functionSymbol = defect.functionSymbol 
-            ? this.escapeCSV(defect.functionSymbol)
-            : this.escapeCSV(defect.code.split('\n')[0] || defect.code);
+          const functionSymbol = this.escapeTSV(
+            defect.functionSymbol || defect.code.split('\n')[0] || defect.code
+          );
           
-          // Use original snippet or code
-          const snippet = defect.snippet 
-            ? this.escapeCSV(defect.snippet)
-            : this.escapeCSV(defect.code);
+          // Use original snippet or code - replace newlines/tabs to keep single-line
+          const rawSnippet = (defect.snippet || defect.code || '')
+            .replace(/\r?\n/g, ' ')
+            .replace(/\t/g, ' ')
+            .replace(/"/g, "'")
+            .trim();
+          const snippet = this.escapeTSV(rawSnippet);
           
           // Use original lines string
-          const lines = defect.lines || (defect.line > 0 ? `L${defect.line}` : '');
+          const lines = this.escapeTSV(defect.lines || (defect.line > 0 ? `L${defect.line}` : ''));
           
           const confidence = defect.severity === 'high' ? 'High' : defect.severity === 'low' ? 'Low' : 'Medium';
           
@@ -514,15 +525,15 @@ class ReportGenerationServiceImpl {
           
           const row = [
             defectIndex++,
-            this.escapeCSV(defectType),
-            this.escapeCSV(fileResult.file.path),
-            this.escapeCSV(functionSymbol),
-            this.escapeCSV(snippet),
-            this.escapeCSV(lines),
-            risk,  // Already escaped above
-            howToTrigger,  // Already escaped above
-            this.escapeCSV(defectRecommendation),
-            this.escapeCSV(confidence)
+            this.escapeTSV(defectType),
+            this.escapeTSV(fileResult.file.path),
+            functionSymbol,   // Already escaped above
+            snippet,          // Already escaped above
+            lines,            // Already escaped above
+            risk,             // Already escaped above
+            howToTrigger,     // Already escaped above
+            this.escapeTSV(defectRecommendation),
+            this.escapeTSV(confidence)
           ];
           
           // Final safety check: ensure no objects in the row
@@ -533,7 +544,7 @@ class ReportGenerationServiceImpl {
             }
           }
           
-          csv += row.join(',') + '\n';
+          csv += row.join(SEP) + '\n';
         }
       }
     }
@@ -706,14 +717,144 @@ class ReportGenerationServiceImpl {
     // Ensure we have a string
     value = String(value);
     
-    // If contains comma, quote, or newline, wrap with quotes and escape internal quotes
-    if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-      return `"${value.replace(/"/g, '""')}"`;
+    // Replace double-quotes with single-quotes to avoid nested "" CSV escaping.
+    // Excel (especially Chinese locale) misparses fields with embedded "" sequences,
+    // causing column misalignment. Single-quotes are safe and preserve readability.
+    value = value.replace(/"/g, "'");
+    
+    // If contains comma, newline, or semicolon (semicolon can be treated as
+    // column separator in some regional Excel/CSV settings), wrap with quotes
+    if (value.includes(',') || value.includes('\n') || value.includes(';')) {
+      return `"${value}"`;
     }
     
     return value;
   }
-  
+
+  /**
+   * Escape a field value for TSV (Tab-Separated Values).
+   * Since Tab is the separator, only tabs and newlines inside the value need to be removed.
+   * No quoting needed - makes Excel parsing 100% reliable.
+   * @param {string} value - Value to escape
+   * @returns {string}
+   */
+  escapeTSV(value) {
+    if (!value && value !== 0) return '';
+    if (typeof value === 'object' && value !== null) {
+      value = value.zh || value.en || JSON.stringify(value);
+    }
+    return String(value)
+      .replace(/\r?\n/g, ' ')  // newline → space
+      .replace(/\t/g, ' ');    // tab → space (cannot have literal tab in a TSV field)
+  }
+
+  /**
+   * Sanitize a cell value for xlsx output (remove newlines/tabs, keep everything else as-is)
+   * @private
+   */
+  _xlsxCell(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object') {
+      value = value.zh || value.en || JSON.stringify(value);
+    }
+    return String(value).replace(/\r?\n/g, ' ').replace(/\t/g, ' ').trim();
+  }
+
+  /**
+   * Generate an xlsx Blob directly from report data using SheetJS.
+   * Returns { blob, fileName }.
+   * @param {DetectionReport} report
+   * @param {string} groupName
+   * @returns {{ blob: Blob, fileName: string }}
+   */
+  generateXLSXReport(report, groupName) {
+    const headers = [
+      'No', 'Category', 'File', 'Function/Symbol',
+      'Snippet', 'Lines', 'Risk', 'HowToTrigger', 'SuggestedFix', 'Confidence'
+    ];
+
+    const rows = [headers];
+    let defectIndex = 1;
+
+    for (const fileResult of report.fileResults) {
+      if (!fileResult.hasDefects || !fileResult.defects.length) continue;
+
+      const validDefects = fileResult.defects.filter(
+        defect => !this.isPlaceholderDefectInMarkdown(defect)
+      );
+
+      for (const defect of validDefects) {
+        // risk
+        let defectRisk = defect.risk || '';
+        if (typeof defectRisk === 'object') defectRisk = defectRisk.zh || defectRisk.en || '';
+
+        // howToTrigger
+        let defectHowToTrigger = defect.howToTrigger || '';
+        if (typeof defectHowToTrigger === 'object') defectHowToTrigger = defectHowToTrigger.zh || defectHowToTrigger.en || '';
+
+        // fallback from description
+        if (!defectRisk && !defectHowToTrigger && defect.description) {
+          const parts = defect.description.split(' - ');
+          defectRisk = parts[0] || '';
+          defectHowToTrigger = parts.slice(1).join(' - ') || '';
+        }
+
+        // recommendation
+        let defectRecommendation = defect.recommendation || '';
+        if (typeof defectRecommendation === 'object') defectRecommendation = defectRecommendation.zh || defectRecommendation.en || '';
+
+        // type
+        let defectType = defect.type || '';
+        if (typeof defectType === 'object') defectType = defectType.zh || defectType.en || '';
+
+        const confidence = defect.severity === 'high' ? 'High' : defect.severity === 'low' ? 'Low' : 'Medium';
+
+        const snippet = this._xlsxCell(defect.snippet || defect.code || '');
+        const functionSymbol = this._xlsxCell(defect.functionSymbol || (defect.code || '').split('\n')[0]);
+        const lines = this._xlsxCell(defect.lines || (defect.line > 0 ? `L${defect.line}` : ''));
+
+        rows.push([
+          defectIndex++,
+          this._xlsxCell(defectType),
+          this._xlsxCell(fileResult.file.path),
+          functionSymbol,
+          snippet,
+          lines,
+          this._xlsxCell(defectRisk),
+          this._xlsxCell(defectHowToTrigger),
+          this._xlsxCell(defectRecommendation),
+          confidence
+        ]);
+      }
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Set column widths for readability
+    ws['!cols'] = [
+      { wch: 5 },   // No
+      { wch: 10 },  // Category
+      { wch: 35 },  // File
+      { wch: 30 },  // Function/Symbol
+      { wch: 50 },  // Snippet
+      { wch: 15 },  // Lines
+      { wch: 20 },  // Risk
+      { wch: 30 },  // HowToTrigger
+      { wch: 40 },  // SuggestedFix
+      { wch: 10 },  // Confidence
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Defects');
+
+    const wbBuf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbBuf], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const fileName = `${groupName.toLowerCase()}.xlsx`;
+    return { blob, fileName };
+  }
+
   /**
    * Check if defect is placeholder
    * @param {DefectInfo} defect - Defect to check
@@ -774,10 +915,27 @@ class ReportGenerationServiceImpl {
       // Import zipPackageService
       const { default: zipPackageService } = await import('./zipPackageService.js');
       
-      // Prepare defect reports
+      // Prepare defect reports - use xlsx directly to avoid all CSV parsing issues
+      const gName = groupName || report.groupName || 'root';
+      const { blob: xlsxBlob } = this.generateXLSXReport(report, gName);
+      const xlsxBuffer = await xlsxBlob.arrayBuffer();
+
+      // Collect flat defects list for HTML statistics (no CSV parsing needed)
+      const allDefects = [];
+      for (const fr of (report.fileResults || [])) {
+        if (fr.hasDefects && fr.defects?.length) {
+          for (const d of fr.defects) {
+            if (!this.isPlaceholderDefectInMarkdown(d)) {
+              allDefects.push({ ...d, _filePath: fr.file?.path || '' });
+            }
+          }
+        }
+      }
+
       const defectReports = [{
-        groupName: groupName || report.groupName || 'root',
-        csvContent: await this.exportReportAsCSV(report, 'auto'),
+        groupName: gName,
+        xlsxBuffer,           // xlsx binary for ZIP packaging
+        defects: allDefects,  // flat list for statistics
         filesScanned: report.totalFiles || 0,
         defectsFound: report.totalDefects || 0
       }];
@@ -855,29 +1013,14 @@ class ReportGenerationServiceImpl {
   async downloadFile(report, groupName, targetLang, format) {
     return new Promise(async (resolve) => {
       try {
-        console.log(`[downloadFile] Generating ${format} (no translation needed - AI output in user language)`);
-        
-        // Use the new export method
-        const exportResult = await this.exportReport(report, format, { targetLang, pretty: true });
-        
-        // Add UTF-8 BOM for CSV files to ensure proper encoding in Excel
-        let content = exportResult.content;
-        if (format.toLowerCase() === 'csv') {
-          // UTF-8 BOM: \uFEFF
-          content = '\uFEFF' + content;
-          console.log(`[DEBUG] CSV 内容前 100 字符:`, content.substring(0, 100));
-          console.log(`[DEBUG] CSV 内容包含中文:`, /[\u4e00-\u9fa5]/.test(content));
-        }
-        
-        // Create blob - use simple MIME type like snail-ai does
-        const blob = new Blob([content], { type: 'text/csv' });
+        console.log(`[downloadFile] Generating xlsx via SheetJS`);
+
+        // Always generate xlsx directly - avoids all CSV separator/encoding issues
+        const { blob, fileName } = this.generateXLSXReport(report, groupName);
         const url = URL.createObjectURL(blob);
-        
-        // Generate filename without language suffix (AI already output in correct language)
-        const fileName = `${groupName.toLowerCase()}.${exportResult.extension}`;
-        
-        console.log(`[downloadFile] 生成的文件名: ${fileName}, 格式: ${format}, 大小: ${exportResult.size} bytes`);
-        
+
+        console.log(`[downloadFile] 生成的文件名: ${fileName}, 大小: ${blob.size} bytes`);
+
         const link = document.createElement('a');
         link.href = url;
         link.download = fileName;

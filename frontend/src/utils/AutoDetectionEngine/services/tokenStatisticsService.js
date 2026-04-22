@@ -446,6 +446,117 @@ class TokenStatisticsService {
   }
 
   /**
+   * Generate token statistics as an xlsx ArrayBuffer using SheetJS.
+   * @param {Object} sessionStats
+   * @param {string} [locale]
+   * @param {Object} [pricing]
+   * @returns {ArrayBuffer|null}
+   */
+  async generateXLSXBuffer(sessionStats, locale = 'zh', pricing = null) {
+    if (!sessionStats || !sessionStats.fileRecords || sessionStats.fileRecords.length === 0) {
+      console.warn('⚠️ No token statistics data to generate xlsx');
+      return null;
+    }
+
+    const XLSX = await import('xlsx');
+
+    const defaultPricing = { promptTokenPrice: 0.03, completionTokenPrice: 0.06 };
+    const actualPricing = pricing || defaultPricing;
+
+    const promptCost = (sessionStats.totalPromptTokens / 1000) * actualPricing.promptTokenPrice;
+    const completionCost = (sessionStats.totalCompletionTokens / 1000) * actualPricing.completionTokenPrice;
+    const totalCost = promptCost + completionCost;
+
+    const isZh = locale === 'zh';
+
+    // --- Sheet 1: per-file records ---
+    const fileHeaders = isZh
+      ? ['文件名', '文件路径', '总行数', '代码行', '注释行', 'Prompt Tokens', 'Completion Tokens', '总 Tokens', '耗时(秒)', '是否估算', '时间戳']
+      : ['File Name', 'File Path', 'Total Lines', 'Code Lines', 'Comment Lines', 'Prompt Tokens', 'Completion Tokens', 'Total Tokens', 'Time(s)', 'Estimated', 'Timestamp'];
+
+    const fileRows = [fileHeaders];
+    for (const r of sessionStats.fileRecords) {
+      fileRows.push([
+        r.fileName,
+        r.filePath,
+        r.totalLines || 0,
+        r.codeLines || 0,
+        r.commentLines || 0,
+        r.promptTokens,
+        r.completionTokens,
+        r.totalTokens,
+        r.processingTime ? +(r.processingTime / 1000).toFixed(1) : 0,
+        r.estimated ? (isZh ? '是' : 'Yes') : (isZh ? '否' : 'No'),
+        new Date(r.timestamp).toISOString()
+      ]);
+    }
+
+    const wsFiles = XLSX.utils.aoa_to_sheet(fileRows);
+    wsFiles['!cols'] = [
+      { wch: 30 }, { wch: 50 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+      { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 26 }
+    ];
+
+    // --- Sheet 2: summary ---
+    const estimatedCount = sessionStats.fileRecords.filter(r => r.estimated).length;
+    const actualCount = sessionStats.fileRecords.length - estimatedCount;
+
+    const summaryRows = isZh ? [
+      ['会话 ID', sessionStats.sessionId],
+      ['开始时间', new Date(sessionStats.startTime).toISOString()],
+      ['结束时间', new Date(sessionStats.endTime).toISOString()],
+      ['持续时间 (毫秒)', sessionStats.endTime - sessionStats.startTime],
+      ['处理文件数', sessionStats.filesProcessed],
+      ['实际数据文件数', actualCount],
+      ['估算数据文件数', estimatedCount],
+      ['总 Prompt Tokens', sessionStats.totalPromptTokens],
+      ['总 Completion Tokens', sessionStats.totalCompletionTokens],
+      ['总 Tokens', sessionStats.totalTokens],
+      ['平均 Prompt Tokens/文件', sessionStats.summary.avgPromptTokensPerFile],
+      ['平均 Completion Tokens/文件', sessionStats.summary.avgCompletionTokensPerFile],
+      ['平均总 Tokens/文件', sessionStats.summary.avgTotalTokensPerFile],
+      [],
+      ['Prompt Token 单价', `$${actualPricing.promptTokenPrice}/1K tokens`],
+      ['Completion Token 单价', `$${actualPricing.completionTokenPrice}/1K tokens`],
+      ['Prompt 费用', `$${promptCost.toFixed(4)}`],
+      ['Completion 费用', `$${completionCost.toFixed(4)}`],
+      ['总费用', `$${totalCost.toFixed(4)}`],
+      ['总费用 (人民币)', `¥${(totalCost * 7.2).toFixed(2)}`],
+    ] : [
+      ['Session ID', sessionStats.sessionId],
+      ['Start Time', new Date(sessionStats.startTime).toISOString()],
+      ['End Time', new Date(sessionStats.endTime).toISOString()],
+      ['Duration (ms)', sessionStats.endTime - sessionStats.startTime],
+      ['Files Processed', sessionStats.filesProcessed],
+      ['Files with Actual Token Data', actualCount],
+      ['Files with Estimated Token Data', estimatedCount],
+      ['Total Prompt Tokens', sessionStats.totalPromptTokens],
+      ['Total Completion Tokens', sessionStats.totalCompletionTokens],
+      ['Total Tokens', sessionStats.totalTokens],
+      ['Avg Prompt Tokens/File', sessionStats.summary.avgPromptTokensPerFile],
+      ['Avg Completion Tokens/File', sessionStats.summary.avgCompletionTokensPerFile],
+      ['Avg Total Tokens/File', sessionStats.summary.avgTotalTokensPerFile],
+      [],
+      ['Prompt Token Price', `$${actualPricing.promptTokenPrice}/1K tokens`],
+      ['Completion Token Price', `$${actualPricing.completionTokenPrice}/1K tokens`],
+      ['Prompt Cost', `$${promptCost.toFixed(4)}`],
+      ['Completion Cost', `$${completionCost.toFixed(4)}`],
+      ['Total Cost', `$${totalCost.toFixed(4)}`],
+      ['Total Cost (CNY)', `¥${(totalCost * 7.2).toFixed(2)}`],
+    ];
+
+    const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+    wsSummary['!cols'] = [{ wch: 35 }, { wch: 30 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsFiles, isZh ? '逐文件统计' : 'Per-File Stats');
+    XLSX.utils.book_append_sheet(wb, wsSummary, isZh ? '汇总' : 'Summary');
+
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    return buf.buffer ?? buf; // ensure ArrayBuffer
+  }
+
+  /**
    * Download token statistics report
    * @param {SessionTokenStatistics} sessionStats - Session statistics
    * @param {string} [fileName] - Custom file name

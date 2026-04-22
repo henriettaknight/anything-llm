@@ -1,5 +1,5 @@
 const { Router } = require("express");
-const { readFileSync } = require("fs");
+const { readFileSync, statSync } = require("fs");
 const { join } = require("path");
 
 /**
@@ -39,11 +39,13 @@ function apiPromptsEndpoints(router) {
 
       let promptContent = null;
       let successPath = null;
+      let promptMtime = null;
 
       for (const filePath of possiblePaths) {
         try {
           promptContent = readFileSync(filePath, "utf-8");
           successPath = filePath;
+          promptMtime = statSync(filePath).mtime.toISOString();
           console.log("✓ Successfully loaded prompt from:", filePath);
           break;
         } catch (err) {
@@ -65,12 +67,17 @@ function apiPromptsEndpoints(router) {
 
       console.log(`✓ Prompt file size: ${promptContent.length} bytes`);
       console.log(`✓ Project type: ${projectType}`);
+      if (promptMtime) {
+        console.log(`✓ Prompt mtime: ${promptMtime}`);
+      }
 
       return res
         .status(200)
         .set({
           "Content-Type": "text/markdown; charset=utf-8",
-          "Cache-Control": "public, max-age=3600",
+          "Cache-Control": "no-store, max-age=0",
+          "X-Prompt-Path": successPath || "",
+          "X-Prompt-Mtime": promptMtime || "",
         })
         .send(promptContent);
     } catch (error) {

@@ -99,8 +99,10 @@ async function getUEDefectDetectionPrompt(projectType) {
       throw new Error(`Failed to fetch prompt: ${response.status}`);
     }
   } catch (error) {
-    serverLog?.error('❌ 从 API 获取提示词失败:', error);
-    throw error;
+    serverLog?.error('❌ 从 API 获取提示词失败，改用本地兜底提示词:', error);
+    const fallback = getEnhancedDefaultPrompt();
+    serverLog?.info(`✓ 使用兜底提示词，长度: ${fallback.length}`);
+    return fallback;
   }
 }
 
@@ -116,40 +118,38 @@ function getEnhancedDefaultPrompt() {
 - 只基于当前代码分析，不借助任何既知缺陷ID/清单
 - 所有缺陷必须有明确代码依据，禁止基于逻辑推测
 
-## 缺陷类别与检测要点
-- AUTO（未初始化/未赋值使用）：局部变量/成员在使用前未赋值
-- ARRAY（越界/无效访问）：TArray/Std容器固定下标访问未判空
-- MEMF（内存释放后继续使用）：delete后访问、悬垂引用/指针
-- LEAK（资源/内存泄漏）：new未释放、UObject未UPROPERTY持有
-- OSRES（系统资源管理）：文件/句柄/存档未关闭
-- STL（不安全STL模式）：遍历中erase误用、循环中频繁分配
-- DEPR（废弃API）：UE/项目标记为Deprecated的调用
-- PERF（性能反模式）：大对象按值传参、热路径频繁分配
-- CLASS（构造/初始化规范）：复杂成员未在构造函数初始化
+## 输出报告格式（必须遵守）
+以 JSON 数组输出，每条缺陷为一个对象，字段如下：
+- no: 序号，从1开始递增
+- category: AUTO/ARRAY/MEMF/LEAK/OSRES/STL/DEPR/PERF/CLASS/COMPILE
+- file: 相对路径
+- function: 函数或符号名
+- snippet: 关键代码（1-3行，用 \\n 连接多行）
+- lines: 行号或范围（如 "L120" 或 "L118-L125"）
+- risk: 风险说明
+- howToTrigger: 触发/重现条件
+- suggestedFix: 最小化入侵的修复建议
+- confidence: High/Medium/Low
 
-## 严格格式要求（必须遵守）
+示例（只输出 JSON 数组，不要输出其他文本）：
+```
+[
+  {
+    "no": 1,
+    "category": "AUTO",
+    "file": "Player/LyraPlayerState.cpp",
+    "function": "ComputeRank_Helper",
+    "snippet": "int32 Bonus; return Base + Bonus;",
+    "lines": "L123-L124",
+    "risk": "未初始化使用",
+    "howToTrigger": "直接调用时",
+    "suggestedFix": "为Bonus赋初值或分支全覆盖",
+    "confidence": "High"
+  }
+]
+```
 
-### 输出格式要求
-- **必须**使用Markdown表格格式输出结果
-- **必须**包含表头：| No | Category | File | Function/Symbol | Snippet | Lines | Risk | HowToTrigger | SuggestedFix | Confidence |
-- **必须**使用正确的分隔符：| 和 - 符号
-- **禁止**使用列表格式（如#### 缺陷）
-- **禁止**使用占位符内容（如----------、-------、------等）
-- **禁止**虚构或猜测缺陷内容
-
-### 表格格式示例
-| No | Category | File | Function/Symbol | Snippet | Lines | Risk | HowToTrigger | SuggestedFix | Confidence |
-|----|----------|------|-----------------|---------|-------|------|--------------|--------------|------------|
-| 1 | AUTO | Player/LyraPlayerState.cpp | ComputeRank_Helper | int32 Bonus; return Base + Bonus; | L123–L124 | 未初始化使用 | 直接调用时 | 为Bonus赋初值或分支全覆盖 | High |
-
-### 内容质量要求
-- **必须**基于实际代码分析，有明确的代码依据
-- **必须**提供具体的行号或代码片段
-- **必须**提供可操作的修复建议
-- **禁止**报告第0行的缺陷（行号从1开始）
-- **禁止**使用通用或模糊的描述
-
-请严格遵守以上格式要求，任何格式错误都将导致解析失败。`;
+请严格遵守以上格式要求，只输出 JSON，不要输出 Markdown 表格或其他说明。`;
 }
 
 /**
@@ -276,7 +276,7 @@ ${pairedFile.content}
 - 检查成员变量时，请查看构造函数（在实现文件中）是否已初始化
 - 只报告真正未初始化的成员变量，不要报告已在构造函数中初始化的变量
 
-请按照指定的缺陷类别进行检测，并以Markdown表格格式输出结果。`;
+请按照指定的缺陷类别进行检测，**严格以 JSON 数组输出**，每个对象包含字段：no、category、file、function、snippet、lines、risk、howToTrigger、suggestedFix、confidence。**只输出 JSON，不要返回 Markdown 或其他说明。**`;
       } else {
         userMessage = `Please perform static defect detection on the following C++ code files:
 
@@ -299,7 +299,7 @@ ${pairedFile.content}
 - When checking member variables, please check if they are initialized in the constructor (in the implementation file)
 - Only report truly uninitialized member variables, do not report variables already initialized in the constructor
 
-Please detect defects according to the specified categories and output the results in Markdown table format.`;
+Detect defects by the specified categories and **output strictly as a JSON array only**, each object with fields: no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence. **Do not return Markdown or any extra text.**`;
       }
     } else {
       // Analyze separately
@@ -314,7 +314,7 @@ Please detect defects according to the specified categories and output the resul
 ${content}
 \`\`\`
 
-请按照指定的缺陷类别进行检测，并以Markdown表格格式输出结果。`;
+请按照指定的缺陷类别进行检测，**严格以 JSON 数组输出**，每个对象字段：no、category、file、function、snippet、lines、risk、howToTrigger、suggestedFix、confidence。**只输出 JSON，不要返回 Markdown 或其他说明。**`;
       } else {
         userMessage = `Please perform static defect detection on the following C++ code file:
 
@@ -326,7 +326,7 @@ Code content:
 ${content}
 \`\`\`
 
-Please detect defects according to the specified categories and output the results in Markdown table format.`;
+Detect defects by the specified categories and **output strictly as a JSON array only**, each object with fields: no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence. **Do not return Markdown or any extra text.**`;
       }
     }
 
@@ -347,7 +347,7 @@ Please detect defects according to the specified categories and output the resul
 
     serverLog?.info(`开始调用AI服务...`);
 
-    // Use non-streaming mode for accurate token statistics
+    // Use streaming mode to avoid nginx proxy_read_timeout (60s) on non-streaming requests
     const timeout = 300000; // 300 seconds
     let responseContent = '';
     let tokenUsage = null;
@@ -360,14 +360,20 @@ Please detect defects according to the specified categories and output the resul
       
       const detectionPromise = (async () => {
         try {
-          // Use non-streaming chat method
-          const result = await codeReviewAIService.adapter.chat(messageHistory, {
+          // Use streaming chat to keep connection alive through nginx proxy
+          for await (const chunk of codeReviewAIService.streamChat(messageHistory, {
             signal: abortController.signal
-          });
-          
-          responseContent = result.content || result.fullText || '';
-          tokenUsage = result.usage;
-          
+          })) {
+            if (chunk.done) {
+              responseContent = chunk.fullText || responseContent;
+              if (chunk.usage) tokenUsage = chunk.usage;
+              break;
+            }
+            if (chunk.content) {
+              responseContent += chunk.content;
+            }
+            if (chunk.usage) tokenUsage = chunk.usage;
+          }
           return responseContent;
         } catch (streamError) {
           console.error('Error during detection:', streamError);
@@ -628,6 +634,38 @@ function parseDefectDetectionResults(response, filePath) {
     return defects;
   }
   
+  // 0. JSON array format (highest priority)
+  console.log('  🔍 Trying JSON array format (priority)...');
+  try {
+    // Strip optional ```json ... ``` or ``` ... ``` fences
+    const jsonText = response.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+    // Find the outermost JSON array
+    const arrayStart = jsonText.indexOf('[');
+    const arrayEnd = jsonText.lastIndexOf(']');
+    if (arrayStart !== -1 && arrayEnd > arrayStart) {
+      const jsonStr = jsonText.slice(arrayStart, arrayEnd + 1);
+      const parsed = JSON.parse(jsonStr);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const jsonDefects = parsed.map((item) => ({
+          category: item.category || 'UNKNOWN',
+          file: item.file || filePath,
+          function: item.function || '',
+          snippet: item.snippet || '',
+          lines: item.lines || '',
+          risk: item.risk || '',
+          howToTrigger: item.howToTrigger || '',
+          suggestedFix: item.suggestedFix || '',
+          confidence: item.confidence || 'Medium',
+        }));
+        console.log(`  ✅ JSON array parsed: ${jsonDefects.length} defects`);
+        console.log('🔧'.repeat(40) + '\n');
+        return jsonDefects;
+      }
+    }
+  } catch (e) {
+    console.log('  ⚠️ JSON parse failed:', e.message);
+  }
+
   // Relaxed parsing logic: directly extract all possible defect information
   // 1. First try English table format
   const tableMatch = response.match(/\|.*\|.*\|.*\|.*\|.*\|.*\|.*\|.*\|.*\|.*\|/g);

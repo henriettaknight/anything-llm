@@ -263,7 +263,7 @@ class DetectionOrchestratorImpl {
       
       // End token statistics session and get statistics
       const tokenStats = tokenStatisticsService.endSession();
-      let tokenStatisticsCSV = '';
+      let tokenStatisticsXLSX = null;
       
       if (tokenStats && tokenStats.filesProcessed > 0) {
         console.log('📊 Token statistics collected:', {
@@ -276,8 +276,8 @@ class DetectionOrchestratorImpl {
         const userLang = detectUserLanguage();
         const locale = userLang === 'zh' ? 'zh' : 'en';
         
-        // Generate token statistics CSV with user's language
-        tokenStatisticsCSV = tokenStatisticsService.generateReport(tokenStats, locale);
+        // Generate token statistics xlsx with user's language
+        tokenStatisticsXLSX = await tokenStatisticsService.generateXLSXBuffer(tokenStats, locale);
       } else {
         console.warn('⚠️ No token statistics collected during this session');
       }
@@ -310,13 +310,27 @@ class DetectionOrchestratorImpl {
           summary: { bySeverity: {}, byType: {} }
         };
         
-        // Convert to DetectionReport format and export as CSV
+        // Convert to DetectionReport format and export as xlsx
         const detectionReport = reportGenerationService.convertCodeDetectionReport(groupReport);
-        const csvContent = await reportGenerationService.exportReportAsCSV(detectionReport, 'auto');
+        const { blob: xlsxBlob } = reportGenerationService.generateXLSXReport(detectionReport, groupName);
+        const xlsxBuffer = await xlsxBlob.arrayBuffer();
+
+        // Collect flat defects for HTML statistics
+        const allDefects = [];
+        for (const fr of (detectionReport.fileResults || [])) {
+          if (fr.hasDefects && fr.defects?.length) {
+            for (const d of fr.defects) {
+              if (!reportGenerationService.isPlaceholderDefectInMarkdown(d)) {
+                allDefects.push({ ...d, _filePath: fr.file?.path || '' });
+              }
+            }
+          }
+        }
         
         defectReports.push({
           groupName: groupName,
-          csvContent: csvContent,
+          xlsxBuffer: xlsxBuffer,   // xlsx binary for ZIP
+          defects: allDefects,       // flat list for statistics
           filesScanned: groupReport.filesScanned,
           defectsFound: groupReport.defectsFound
         });
@@ -343,7 +357,7 @@ class DetectionOrchestratorImpl {
       
       await zipPackageService.packageAndDownload({
         defectReports: defectReports,
-        tokenStatistics: tokenStatisticsCSV,
+        tokenStatistics: tokenStatisticsXLSX,
         htmlReport: htmlReport,
         fileName: `report_${timestamp}`
       });
@@ -446,7 +460,7 @@ class DetectionOrchestratorImpl {
       
       // End token statistics session (even on error)
       const tokenStats = tokenStatisticsService.endSession();
-      let tokenStatisticsCSV = '';
+      let tokenStatisticsXLSX = null;
       
       if (tokenStats && tokenStats.filesProcessed > 0) {
         console.log('📊 Token statistics collected (partial):', {
@@ -459,8 +473,8 @@ class DetectionOrchestratorImpl {
         const userLang = detectUserLanguage();
         const locale = userLang === 'zh' ? 'zh' : 'en';
         
-        // Generate token statistics CSV with user's language
-        tokenStatisticsCSV = tokenStatisticsService.generateReport(tokenStats, locale);
+        // Generate token statistics xlsx with user's language
+        tokenStatisticsXLSX = await tokenStatisticsService.generateXLSXBuffer(tokenStats, locale);
         
         // Try to package partial results into ZIP
         try {
@@ -493,18 +507,31 @@ class DetectionOrchestratorImpl {
               };
               
               const detectionReport = reportGenerationService.convertCodeDetectionReport(groupReport);
-              const csvContent = await reportGenerationService.exportReportAsCSV(detectionReport, 'auto');
-              
+              const { blob: xlsxBlob2 } = reportGenerationService.generateXLSXReport(detectionReport, groupName);
+              const xlsxBuffer2 = await xlsxBlob2.arrayBuffer();
+
+              const allDefects2 = [];
+              for (const fr of (detectionReport.fileResults || [])) {
+                if (fr.hasDefects && fr.defects?.length) {
+                  for (const d of fr.defects) {
+                    if (!reportGenerationService.isPlaceholderDefectInMarkdown(d)) {
+                      allDefects2.push({ ...d, _filePath: fr.file?.path || '' });
+                    }
+                  }
+                }
+              }
+
               defectReports.push({
                 groupName: groupName,
-                csvContent: csvContent,
+                xlsxBuffer: xlsxBuffer2,
+                defects: allDefects2,
                 filesScanned: groupReport.filesScanned,
                 defectsFound: groupReport.defectsFound
               });
             }
           }
           
-          if (defectReports.length > 0 || tokenStatisticsCSV) {
+          if (defectReports.length > 0 || tokenStatisticsXLSX) {
             const htmlReport = zipPackageService.generateHTMLSummary({
               defectReports: defectReports,
               tokenStats: tokenStats
@@ -519,7 +546,7 @@ class DetectionOrchestratorImpl {
             
             await zipPackageService.packageAndDownload({
               defectReports: defectReports,
-              tokenStatistics: tokenStatisticsCSV,
+              tokenStatistics: tokenStatisticsXLSX,
               htmlReport: htmlReport,
               fileName: `report_${timestamp}_partial`
             });
