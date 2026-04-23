@@ -24,7 +24,17 @@ function directAiProxyEndpoints(app) {
         }
 
         console.log('[DirectAIProxy] Proxying request to:', url);
-        console.log('[DirectAIProxy] Request body:', JSON.stringify(body).substring(0, 200));
+        console.log('[DirectAIProxy] Request body (first 200):', JSON.stringify(body).substring(0, 200));
+        // Log messages structure to confirm they arrived intact
+        if (body && body.messages) {
+          console.log('[DirectAIProxy] Messages received:', body.messages.length);
+          body.messages.forEach((m, i) => {
+            const len = typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length;
+            console.log(`[DirectAIProxy]   [${i}] role=${m.role}, content_length=${len}`);
+          });
+        } else {
+          console.warn('[DirectAIProxy] ⚠️ No messages in request body!');
+        }
 
         // Detect if this is Ollama based on model name instead of URL
         // Also detect by port 11434 (default Ollama port)
@@ -52,9 +62,22 @@ function directAiProxyEndpoints(app) {
             model: body.model,
             messages: body.messages,
             stream: body.stream !== false,
-            temperature: body.temperature || 0.7
+            // Use body.temperature exactly; avoid `|| 0.7` because 0 is falsy but valid
+            temperature: typeof body.temperature === 'number' ? body.temperature : 0.7,
+            options: {
+              // Explicitly set context window to avoid Ollama truncating input prompt.
+              // Without this, Ollama defaults to KvSize=8192 which truncates long code prompts.
+              num_ctx: body.options?.num_ctx || 32768
+            }
           };
           console.log('[DirectAIProxy] Transformed to Ollama format');
+          if (transformedBody.messages) {
+            console.log('[DirectAIProxy] Sending to Ollama, messages:', transformedBody.messages.length);
+            transformedBody.messages.forEach((m, i) => {
+              const len = typeof m.content === 'string' ? m.content.length : 0;
+              console.log(`[DirectAIProxy]   [${i}] role=${m.role}, content_length=${len}`);
+            });
+          }
         }
 
         // Forward the request to backend

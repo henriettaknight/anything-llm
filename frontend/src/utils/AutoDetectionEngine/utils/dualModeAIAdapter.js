@@ -264,7 +264,7 @@ export class DirectAIAdapter {
       const requestStartTime = Date.now();
       
       const requestPayload = useProxy ? {
-        url: `${this.url}/v1/chat/completions`,
+        url: `${this.url}${apiEndpoint}`,
         body: requestBody
       } : requestBody;
       

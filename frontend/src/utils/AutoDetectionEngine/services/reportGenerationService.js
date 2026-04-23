@@ -486,15 +486,15 @@ class ReportGenerationServiceImpl {
             risk = this.escapeTSV(defectRisk);
             howToTrigger = this.escapeTSV(defectHowToTrigger);
           } else {
-            // Fallback: split from description
-            const descriptionParts = defect.description.split(' - ');
+            // Fallback: split from description (may not exist in JSON-parsed defects)
+            const descriptionParts = (defect.description || '').split(' - ');
             risk = this.escapeTSV(descriptionParts[0] || '');
             howToTrigger = this.escapeTSV(descriptionParts.slice(1).join(' - ') || '');
           }
           
-          // Use original functionSymbol or extract from code
+          // function / functionSymbol (JSON parser uses 'function', legacy uses 'functionSymbol')
           const functionSymbol = this.escapeTSV(
-            defect.functionSymbol || defect.code.split('\n')[0] || defect.code
+            defect['function'] || defect.functionSymbol || (defect.code || '').split('\n')[0] || ''
           );
           
           // Use original snippet or code - replace newlines/tabs to keep single-line
@@ -508,18 +508,21 @@ class ReportGenerationServiceImpl {
           // Use original lines string
           const lines = this.escapeTSV(defect.lines || (defect.line > 0 ? `L${defect.line}` : ''));
           
-          const confidence = defect.severity === 'high' ? 'High' : defect.severity === 'low' ? 'Low' : 'Medium';
+          // confidence: JSON parser uses 'confidence' string directly; legacy used 'severity' enum
+          const rawConfidence = defect.confidence || defect.severity || '';
+          const confidence = rawConfidence === 'high' ? 'High'
+            : rawConfidence === 'low' ? 'Low'
+            : rawConfidence || 'Medium';
           
-          // Use original fields directly without translation
-          let defectRecommendation = defect.recommendation;
+          // suggestedFix / recommendation (JSON parser uses 'suggestedFix', legacy uses 'recommendation')
+          let defectRecommendation = defect.suggestedFix || defect.recommendation || '';
           if (typeof defectRecommendation === 'object' && defectRecommendation !== null) {
-            console.warn('⚠️ defect.recommendation is object:', defectRecommendation);
             defectRecommendation = defectRecommendation.zh || defectRecommendation.en || String(defectRecommendation);
           }
           
-          let defectType = defect.type;
+          // category / type (JSON parser uses 'category', legacy uses 'type')
+          let defectType = defect.category || defect.type || '';
           if (typeof defectType === 'object' && defectType !== null) {
-            console.warn('⚠️ defect.type is object:', defectType);
             defectType = defectType.zh || defectType.en || String(defectType);
           }
           
@@ -777,13 +780,22 @@ class ReportGenerationServiceImpl {
     let defectIndex = 1;
 
     for (const fileResult of report.fileResults) {
-      if (!fileResult.hasDefects || !fileResult.defects.length) continue;
+      if (!fileResult?.defects?.length) continue;
 
       const validDefects = fileResult.defects.filter(
         defect => !this.isPlaceholderDefectInMarkdown(defect)
       );
 
-      for (const defect of validDefects) {
+      // Fallback: if all defects were filtered out but raw defects exist, keep raw defects to avoid empty xlsx.
+      const defectsForExport = validDefects.length > 0 ? validDefects : fileResult.defects;
+      if (validDefects.length === 0 && fileResult.defects.length > 0) {
+        console.warn('[generateXLSXReport] All defects filtered as placeholders, fallback to raw defects', {
+          file: fileResult.file?.path,
+          rawCount: fileResult.defects.length
+        });
+      }
+
+      for (const defect of defectsForExport) {
         // risk
         let defectRisk = defect.risk || '';
         if (typeof defectRisk === 'object') defectRisk = defectRisk.zh || defectRisk.en || '';
@@ -799,18 +811,23 @@ class ReportGenerationServiceImpl {
           defectHowToTrigger = parts.slice(1).join(' - ') || '';
         }
 
-        // recommendation
-        let defectRecommendation = defect.recommendation || '';
+        // suggestedFix / recommendation (JSON parser uses 'suggestedFix', legacy uses 'recommendation')
+        let defectRecommendation = defect.suggestedFix || defect.recommendation || '';
         if (typeof defectRecommendation === 'object') defectRecommendation = defectRecommendation.zh || defectRecommendation.en || '';
 
-        // type
-        let defectType = defect.type || '';
+        // category / type (JSON parser uses 'category', legacy uses 'type')
+        let defectType = defect.category || defect.type || '';
         if (typeof defectType === 'object') defectType = defectType.zh || defectType.en || '';
 
-        const confidence = defect.severity === 'high' ? 'High' : defect.severity === 'low' ? 'Low' : 'Medium';
+        // confidence: JSON parser uses 'confidence' string directly; legacy used 'severity' enum
+        const rawConfidence = defect.confidence || defect.severity || '';
+        const confidence = rawConfidence === 'high' ? 'High'
+          : rawConfidence === 'low' ? 'Low'
+          : rawConfidence || 'Medium';
 
+        // function / functionSymbol (JSON parser uses 'function', legacy uses 'functionSymbol')
+        const functionSymbol = this._xlsxCell(defect['function'] || defect.functionSymbol || (defect.code || '').split('\n')[0] || '');
         const snippet = this._xlsxCell(defect.snippet || defect.code || '');
-        const functionSymbol = this._xlsxCell(defect.functionSymbol || (defect.code || '').split('\n')[0]);
         const lines = this._xlsxCell(defect.lines || (defect.line > 0 ? `L${defect.line}` : ''));
 
         rows.push([
@@ -861,22 +878,18 @@ class ReportGenerationServiceImpl {
    * @returns {boolean} - True if placeholder
    */
   isPlaceholderDefectInMarkdown(defect) {
-    const placeholders = ['----------', '-------', '------', '-----------------', '--------------', '-', ''];
+    const placeholders = ['----------', '-------', '------', '-----------------', '--------------', '-'];
+    // NOTE: empty string '' intentionally removed from placeholders list –
+    // snippet/code fields are optional (AI may omit them).
+    // Only require that `type` (category) is a non-empty, non-placeholder string.
     
-    // Only check critical fields that must have meaningful content
-    // Don't filter out defects just because some optional fields are empty
-    const criticalValues = [
-      defect.type,  // Must have type/category
-      defect.code   // Must have code/snippet
-    ];
+    const typeValue = defect.type;
     
-    // Check if critical fields are empty or placeholder
-    return criticalValues.some(value => 
-      !value || 
-      placeholders.includes(value) || 
-      (typeof value === 'string' && value.includes('---')) || 
-      (typeof value === 'string' && value.trim() === '')
-    );
+    // If type is missing or is a pure placeholder dash sequence, treat as placeholder
+    return !typeValue ||
+      placeholders.includes(typeValue) ||
+      (typeof typeValue === 'string' && typeValue.includes('---')) ||
+      (typeof typeValue === 'string' && typeValue.trim() === '');
   }
 
   /**

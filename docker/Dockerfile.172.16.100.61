@@ -155,8 +155,8 @@ ENV VITE_KEYCLOAK_URL=https://172.16.100.61
 ENV VITE_KEYCLOAK_REALM=anythingllm
 ENV VITE_KEYCLOAK_CLIENT_ID=anythingllm
 ENV VITE_AI_MODE=direct
-ENV VITE_DIRECT_AI_URL=http://vllm:8000
-ENV VITE_DIRECT_AI_MODEL=gpt-oss-20b
+ENV VITE_DIRECT_AI_URL=http://172.16.100.61:11434
+ENV VITE_DIRECT_AI_MODEL=gemma4-31b
 
 RUN yarn build
 WORKDIR /app
@@ -166,6 +166,8 @@ WORKDIR /app
 FROM build AS backend-build
 COPY --chown=anythingllm:anythingllm ./server /app/server/
 WORKDIR /app/server
+# Remove old SQLite migrations to avoid provider mismatch with PostgreSQL
+RUN rm -rf ./prisma/migrations
 RUN yarn install --production --network-timeout 100000 && yarn cache clean
 WORKDIR /app
 

@@ -455,7 +455,47 @@ Detect defects by the specified categories and **output strictly as a JSON array
     }
 
     // Parse detection results
-    const defects = parseDefectDetectionResults(responseContent, fileInfo.path);
+    let defects = parseDefectDetectionResults(responseContent, fileInfo.path);
+
+    // Retry once when model returns meta/prompt-ack text (common with some Ollama models)
+    if (defects.length === 0 && isPromptAckOrMetaResponse(responseContent)) {
+      console.warn('⚠️ 检测响应疑似提示词确认文本，触发一次强约束重试:', fileInfo.name);
+      serverLog?.warn(`检测响应疑似提示词确认文本，触发一次强约束重试: ${fileInfo.name}`);
+
+      const retryMessageHistory = [
+        ...messageHistory,
+        {
+          role: 'user',
+          content: '你已经拿到了完整代码。不要重复说明规则、不要索要代码、不要前言。现在仅返回 JSON 数组（可为空数组），字段固定：no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence。'
+        }
+      ];
+
+      let retryResponse = '';
+      try {
+        // Create a fresh AbortController – the original one may already be aborted
+        const retryAbortController = new AbortController();
+        const retryTimeoutId = setTimeout(() => retryAbortController.abort(), timeout);
+        for await (const chunk of codeReviewAIService.streamChat(retryMessageHistory, {
+          signal: retryAbortController.signal
+        })) {
+          if (chunk.done) {
+            retryResponse = chunk.fullText || retryResponse;
+            break;
+          }
+          if (chunk.content) retryResponse += chunk.content;
+        }
+
+        clearTimeout(retryTimeoutId);
+        if (retryResponse) {
+          console.log('🔁 Retry response received, length:', retryResponse.length);
+          defects = parseDefectDetectionResults(retryResponse, fileInfo.path);
+        }
+      } catch (retryError) {
+        console.error('❌ Retry request failed:', retryError);
+        serverLog?.error(`重试检测失败: ${fileInfo.name}`, retryError);
+      }
+    }
+
     serverLog?.info(`文件 ${fileInfo.name} 检测完成，发现 ${defects.length} 个缺陷`);
     
     return defects;
@@ -609,6 +649,33 @@ function recordTokenStatisticsOnFailure(
 }
 
 /**
+ * Detect model meta/prompt-ack responses that do not contain actual analysis output.
+ * @param {string} response
+ * @returns {boolean}
+ */
+function isPromptAckOrMetaResponse(response) {
+  const text = (response || '').toLowerCase();
+  if (!text) return false;
+
+  const markers = [
+    'please provide the source code',
+    'please provide the code',
+    'i am ready to evaluate',
+    'i have internalized',
+    'bug hunter',
+    'i will adhere to the following output format',
+    'i can start analyzing once you provide',
+    '请提供源代码',
+    '请提供代码',
+    '我已理解',
+    '我已准备好分析'
+  ];
+
+  const hitCount = markers.reduce((count, m) => count + (text.includes(m) ? 1 : 0), 0);
+  return hitCount >= 2;
+}
+
+/**
  * Parse AI returned defect detection results (using relaxed static detection parsing logic)
  * @param {string} response - AI response
  * @param {string} filePath - File path
@@ -621,6 +688,11 @@ function parseDefectDetectionResults(response, filePath) {
   console.log('🔧 Starting to parse AI response:');
   console.log('  - Response length:', response.length);
   console.log('  - File path:', filePath);
+  
+  // ===== Always print full response for debugging =====
+  console.log('\n===== FULL AI RESPONSE START =====');
+  console.log(response);
+  console.log('===== FULL AI RESPONSE END =====\n');
   
   serverLog?.debug('AI响应内容:', response.substring(0, 500)); // Debug log
   
@@ -637,8 +709,12 @@ function parseDefectDetectionResults(response, filePath) {
   // 0. JSON array format (highest priority)
   console.log('  🔍 Trying JSON array format (priority)...');
   try {
-    // Strip optional ```json ... ``` or ``` ... ``` fences
-    const jsonText = response.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+    // Strip ALL ```json ... ``` or ``` ... ``` fences anywhere in the response (not just at start)
+    // This handles cases where AI wraps output in code blocks with or without leading text
+    const jsonText = response
+      .replace(/```(?:json)?\s*/gi, '')  // remove all opening code fences
+      .replace(/```\s*/g, '')            // remove all closing code fences
+      .trim();
     // Find the outermost JSON array
     const arrayStart = jsonText.indexOf('[');
     const arrayEnd = jsonText.lastIndexOf(']');
@@ -664,6 +740,32 @@ function parseDefectDetectionResults(response, filePath) {
     }
   } catch (e) {
     console.log('  ⚠️ JSON parse failed:', e.message);
+    // (full response already printed at function entry above)
+    // Try a second pass: greedy regex to capture the entire JSON array (not non-greedy)
+    try {
+      const arrayMatch = response.match(/\[\s*\{[\s\S]*\}\s*\]/);   // greedy – captures full array
+      if (arrayMatch) {
+        const parsed = JSON.parse(arrayMatch[0]);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const jsonDefects = parsed.map((item) => ({
+            category: item.category || 'UNKNOWN',
+            file: item.file || filePath,
+            function: item.function || '',
+            snippet: item.snippet || '',
+            lines: item.lines || '',
+            risk: item.risk || '',
+            howToTrigger: item.howToTrigger || '',
+            suggestedFix: item.suggestedFix || '',
+            confidence: item.confidence || 'Medium',
+          }));
+          console.log(`  ✅ JSON array parsed (regex fallback): ${jsonDefects.length} defects`);
+          console.log('🔧'.repeat(40) + '\n');
+          return jsonDefects;
+        }
+      }
+    } catch (e2) {
+      console.log('  ⚠️ JSON regex fallback also failed:', e2.message);
+    }
   }
 
   // Relaxed parsing logic: directly extract all possible defect information
