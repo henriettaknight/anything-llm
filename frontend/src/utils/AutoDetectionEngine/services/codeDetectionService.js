@@ -347,7 +347,7 @@ Detect defects by the specified categories and **output strictly as a JSON array
 
     serverLog?.info(`开始调用AI服务...`);
 
-    // Use streaming mode to avoid nginx proxy_read_timeout (60s) on non-streaming requests
+    // Use non-streaming mode to allow Ollama KV Cache release between requests
     const timeout = 300000; // 300 seconds
     let responseContent = '';
     let tokenUsage = null;
@@ -360,24 +360,17 @@ Detect defects by the specified categories and **output strictly as a JSON array
       
       const detectionPromise = (async () => {
         try {
-          // Use streaming chat to keep connection alive through nginx proxy
-          for await (const chunk of codeReviewAIService.streamChat(messageHistory, {
+          // Use non-streaming chat to allow Ollama to release KV Cache after each request
+          const result = await codeReviewAIService.adapter.chat(messageHistory, {
             signal: abortController.signal
-          })) {
-            if (chunk.done) {
-              responseContent = chunk.fullText || responseContent;
-              if (chunk.usage) tokenUsage = chunk.usage;
-              break;
-            }
-            if (chunk.content) {
-              responseContent += chunk.content;
-            }
-            if (chunk.usage) tokenUsage = chunk.usage;
-          }
+          });
+
+          responseContent = result.content || result.fullText || '';
+          tokenUsage = result.usage || null;
           return responseContent;
-        } catch (streamError) {
-          console.error('Error during detection:', streamError);
-          throw streamError;
+        } catch (chatError) {
+          console.error('Error during detection:', chatError);
+          throw chatError;
         }
       })();
       
@@ -475,15 +468,11 @@ Detect defects by the specified categories and **output strictly as a JSON array
         // Create a fresh AbortController – the original one may already be aborted
         const retryAbortController = new AbortController();
         const retryTimeoutId = setTimeout(() => retryAbortController.abort(), timeout);
-        for await (const chunk of codeReviewAIService.streamChat(retryMessageHistory, {
+        // Use non-streaming chat (consistent with main path, avoids nginx timeout)
+        const retryResult = await codeReviewAIService.adapter.chat(retryMessageHistory, {
           signal: retryAbortController.signal
-        })) {
-          if (chunk.done) {
-            retryResponse = chunk.fullText || retryResponse;
-            break;
-          }
-          if (chunk.content) retryResponse += chunk.content;
-        }
+        });
+        retryResponse = retryResult.content || retryResult.fullText || '';
 
         clearTimeout(retryTimeoutId);
         if (retryResponse) {

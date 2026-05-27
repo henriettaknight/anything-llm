@@ -70,25 +70,30 @@ export class DirectAIAdapter {
         console.log('  - First 300 chars:', userMessage.content.substring(0, 300));
       }
       
+      // Use backend proxy to avoid CORS and Mixed Content issues
+      const useProxy = window.location.protocol === 'https:' && this.url.startsWith('http://');
+
+      // KEY FIX: When using proxy, always send stream:true to keep nginx alive.
+      // The proxy transparently streams data back, preventing nginx 504 timeout.
+      // When NOT using proxy (direct HTTP), use stream:false for simple JSON response.
+      const useStreaming = useProxy;
+
       const requestBody = {
         model: this.model,
         messages,
-        stream: false,  // Non-streaming mode for token statistics
+        stream: useStreaming,
         temperature: this.temperature,
       };
       
       console.log('\n📤 Complete Request Body:');
       console.log('  - model:', requestBody.model);
       console.log('  - messagesCount:', requestBody.messages.length);
-      console.log('  - stream:', requestBody.stream);
+      console.log('  - stream:', requestBody.stream, useStreaming ? '(forced to avoid nginx 504)' : '');
       console.log('  - temperature:', requestBody.temperature);
       console.log('\n📋 Full messages structure:');
       requestBody.messages.forEach((msg, idx) => {
         console.log(`  [${idx}] role: ${msg.role}, content length: ${msg.content.length}`);
       });
-      
-      // Use backend proxy to avoid CORS and Mixed Content issues
-      const useProxy = window.location.protocol === 'https:' && this.url.startsWith('http://');
       
       // Determine the correct API endpoint based on model/service
       let apiEndpoint = '/v1/chat/completions'; // Default for vLLM
@@ -114,13 +119,20 @@ export class DirectAIAdapter {
         body: requestBody
       } : requestBody;
       
+      const timeoutSignal = AbortSignal.timeout(600000);
+      const controller = new AbortController();
+      if (options.signal) {
+        options.signal.addEventListener('abort', () => controller.abort());
+      }
+      timeoutSignal.addEventListener('abort', () => controller.abort());
+
       const response = await fetch(fullUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestPayload),
-        signal: options.signal
+        signal: controller.signal
       });
 
       const requestEndTime = Date.now();
@@ -137,17 +149,85 @@ export class DirectAIAdapter {
         throw new Error(`Direct AI API error: ${response.status} - ${errorText}`);
       }
       
+      // Streaming path: collect full response from SSE stream (keeps nginx alive)
+      if (useStreaming) {
+        console.log('\n✅ Response OK, collecting streaming response...');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullContent = '';
+        let tokenUsage = null;
+        let chunkCount = 0;
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith(':')) continue;
+
+              let rawData = trimmed;
+              if (rawData.startsWith('data: ')) {
+                rawData = rawData.slice(6);
+              }
+              if (rawData === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(rawData);
+                // Collect content from both Ollama and OpenAI/vLLM formats
+                const chunk = parsed.message?.content || parsed.choices?.[0]?.delta?.content || '';
+                if (chunk) {
+                  fullContent += chunk;
+                  chunkCount++;
+                }
+                // Collect token usage from Ollama done signal
+                if (parsed.done === true) {
+                  const p = parsed.prompt_eval_count || 0;
+                  const c = parsed.eval_count || 0;
+                  tokenUsage = { prompt_tokens: p, completion_tokens: c, total_tokens: p + c };
+                }
+                // Collect token usage from OpenAI format
+                if (parsed.usage) {
+                  tokenUsage = parsed.usage;
+                }
+              } catch {}
+            }
+          }
+        } finally {
+          reader.releaseLock();
+        }
+
+        console.log('\n✅ Streaming response collected:');
+        console.log('  - Total chunks:', chunkCount);
+        console.log('  - Content length:', fullContent.length);
+        console.log('  - First 500 chars:', fullContent.substring(0, 500));
+        console.log('  - Last 200 chars:', fullContent.substring(fullContent.length - 200));
+        if (tokenUsage) {
+          console.log('  - Token usage:', JSON.stringify(tokenUsage));
+        } else {
+          console.warn('  - ⚠️ No token usage data in stream');
+        }
+        console.log('='.repeat(80) + '\n');
+
+        return { content: fullContent, usage: tokenUsage, done: true, fullText: fullContent };
+      }
+
+      // Non-streaming path (direct HTTP, no proxy, no nginx)
       console.log('\n✅ Response OK, parsing JSON...');
 
       const data = await response.json();
 
-      // 验证A：打印原始响应结构，确认是否存在 Ollama 格式字段
       console.log('\n🔍 Raw response diagnostics:');
       console.log('  - Top-level keys:', Object.keys(data || {}));
       console.log('  - Has choices[0].message.content:', !!data?.choices?.[0]?.message?.content);
       console.log('  - Has message.content (Ollama):', !!data?.message?.content);
-      console.log('  - choices[0].message.content preview:', (data?.choices?.[0]?.message?.content || '').substring(0, 200));
-      console.log('  - message.content preview:', (data?.message?.content || '').substring(0, 200));
       console.log('  - usage:', data?.usage || null);
       console.log('  - prompt_eval_count:', data?.prompt_eval_count ?? null);
       console.log('  - eval_count:', data?.eval_count ?? null);
@@ -157,23 +237,10 @@ export class DirectAIAdapter {
 
       console.log('\n✅ Response parsed:');
       console.log('  - Content length:', content.length);
-      console.log('  - First 500 chars:', content.substring(0, 500));
-      console.log('  - Last 200 chars:', content.substring(content.length - 200));
-
-      if (usage) {
-        console.log('  - Token usage:', JSON.stringify(usage));
-      } else {
-        console.warn('  - ⚠️ No token usage data in response');
-      }
-      
+      if (usage) console.log('  - Token usage:', JSON.stringify(usage));
       console.log('='.repeat(80) + '\n');
-      
-      return {
-        content,
-        usage,
-        done: true,
-        fullText: content
-      };
+
+      return { content, usage, done: true, fullText: content };
       
     } catch (error) {
       if (error.name === 'AbortError') {
@@ -268,13 +335,20 @@ export class DirectAIAdapter {
         body: requestBody
       } : requestBody;
       
+      const timeoutSignal = AbortSignal.timeout(600000);
+      const streamController = new AbortController();
+      if (options.signal) {
+        options.signal.addEventListener('abort', () => streamController.abort());
+      }
+      timeoutSignal.addEventListener('abort', () => streamController.abort());
+
       const response = await fetch(fullUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestPayload),
-        signal: options.signal
+        signal: streamController.signal
       });
 
       const requestEndTime = Date.now();
