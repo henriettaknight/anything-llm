@@ -17,6 +17,109 @@ export class DirectAIAdapter {
     this.url = config.url;
     this.model = config.model;
     this.temperature = config.temperature || 0;
+    this.apiKey = config.apiKey || null;
+  }
+
+  /**
+   * Determine the API endpoint based on service URL.
+   * Ollama uses port 11434, vLLM/OpenAI use other ports.
+   * @private
+   * @returns {'/api/chat' | '/v1/chat/completions'}
+   */
+  _getApiEndpoint() {
+    const isOllamaService = this.url && this.url.includes(':11434');
+    return isOllamaService ? '/api/chat' : '/v1/chat/completions';
+  }
+
+  /**
+   * Build request config (url, payload, proxy flag) shared by chat & streamChat.
+   * @private
+   * @param {Object} requestBody - The request body to send
+   * @returns {{ useProxy: boolean, apiEndpoint: string, fullUrl: string, requestPayload: Object }}
+   */
+  _buildRequestConfig(requestBody) {
+    const useProxy = window.location.protocol === 'https:' && this.url.startsWith('http://');
+    const apiEndpoint = this._getApiEndpoint();
+    const fullUrl = useProxy
+      ? '/api/direct-ai-proxy'
+      : `${this.url}${apiEndpoint}`;
+    const requestPayload = useProxy
+      ? { url: `${this.url}${apiEndpoint}`, body: requestBody, apiKey: this.apiKey }
+      : requestBody;
+    const headers = { 'Content-Type': 'application/json' };
+    // Direct request (not proxy) needs Authorization header
+    if (!useProxy && this.apiKey) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    return { useProxy, apiEndpoint, fullUrl, requestPayload, headers };
+  }
+
+  /**
+   * Create an AbortController with timeout and optional external signal.
+   * @private
+   * @param {Object} options - Options containing optional signal
+   * @param {number} [timeoutMs=600000] - Timeout in milliseconds
+   * @returns {AbortController}
+   */
+  _createAbortController(options, timeoutMs = 600000) {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const controller = new AbortController();
+    if (options.signal) {
+      options.signal.addEventListener('abort', () => controller.abort());
+    }
+    timeoutSignal.addEventListener('abort', () => controller.abort());
+    return controller;
+  }
+
+  /**
+   * Log common request diagnostics (messages, request body, endpoint info).
+   * @private
+   */
+  _logRequestDiagnostics(messages, requestBody, { useProxy, apiEndpoint, fullUrl }) {
+    const isOllamaService = apiEndpoint === '/api/chat';
+    console.log('\n' + '='.repeat(80));
+    console.log('🤖 DirectAIAdapter: Starting request');
+    console.log('='.repeat(80));
+    console.log('📍 Target URL:', this.url);
+    console.log('📍 Model:', this.model);
+    console.log('📍 Temperature:', this.temperature);
+    console.log('📝 Messages count:', messages.length);
+
+    const systemMessage = messages.find(m => m.role === 'system');
+    if (systemMessage) {
+      console.log('\n✓ System prompt found:');
+      console.log('  - Length:', systemMessage.content.length, 'characters');
+      console.log('  - First 500 chars:', systemMessage.content.substring(0, 500));
+      console.log('  - Last 200 chars:', systemMessage.content.substring(systemMessage.content.length - 200));
+      console.log('  - MD5 hash:', this._simpleHash(systemMessage.content));
+    } else {
+      console.warn('⚠️ No system prompt found in messages!');
+    }
+
+    const userMessage = messages.find(m => m.role === 'user');
+    if (userMessage) {
+      console.log('\n✓ User message found:');
+      console.log('  - Length:', userMessage.content.length, 'characters');
+      console.log('  - First 300 chars:', userMessage.content.substring(0, 300));
+    }
+
+    console.log('\n📤 Complete Request Body:');
+    console.log('  - model:', requestBody.model);
+    console.log('  - messagesCount:', requestBody.messages.length);
+    console.log('  - stream:', requestBody.stream);
+    console.log('  - temperature:', requestBody.temperature);
+    console.log('\n📋 Full messages structure:');
+    requestBody.messages.forEach((msg, idx) => {
+      console.log(`  [${idx}] role: ${msg.role}, content length: ${msg.content.length}`);
+    });
+
+    console.log('\n🌐 Sending HTTP Request:');
+    console.log('  - URL:', fullUrl);
+    console.log('  - Using proxy:', useProxy);
+    console.log('  - API endpoint:', apiEndpoint, isOllamaService ? '(Ollama)' : '(vLLM/OpenAI)');
+    console.log('  - Method: POST');
+    console.log('  - Has API Key:', !!this.apiKey);
+    console.log('  - Body size:', JSON.stringify(requestBody).length, 'bytes');
   }
 
   /**
@@ -42,40 +145,9 @@ export class DirectAIAdapter {
    */
   async chat(messages, options = {}) {
     try {
-      console.log('\n' + '='.repeat(80));
-      console.log('🤖 DirectAIAdapter: Starting non-streaming request');
-      console.log('='.repeat(80));
-      console.log('📍 Target URL:', this.url);
-      console.log('📍 Model:', this.model);
-      console.log('📍 Temperature:', this.temperature);
-      console.log('📝 Messages count:', messages.length);
-      
-      // Log system prompt info
-      const systemMessage = messages.find(m => m.role === 'system');
-      if (systemMessage) {
-        console.log('\n✓ System prompt found:');
-        console.log('  - Length:', systemMessage.content.length, 'characters');
-        console.log('  - First 500 chars:', systemMessage.content.substring(0, 500));
-        console.log('  - Last 200 chars:', systemMessage.content.substring(systemMessage.content.length - 200));
-        console.log('  - MD5 hash:', this._simpleHash(systemMessage.content));
-      } else {
-        console.warn('⚠️ No system prompt found in messages!');
-      }
-      
-      // Log user message info
-      const userMessage = messages.find(m => m.role === 'user');
-      if (userMessage) {
-        console.log('\n✓ User message found:');
-        console.log('  - Length:', userMessage.content.length, 'characters');
-        console.log('  - First 300 chars:', userMessage.content.substring(0, 300));
-      }
-      
-      // Use backend proxy to avoid CORS and Mixed Content issues
+      // When using proxy, force stream:true to keep nginx alive (prevents 504 timeout).
+      // When direct HTTP (no proxy), use stream:false for simple JSON response.
       const useProxy = window.location.protocol === 'https:' && this.url.startsWith('http://');
-
-      // KEY FIX: When using proxy, always send stream:true to keep nginx alive.
-      // The proxy transparently streams data back, preventing nginx 504 timeout.
-      // When NOT using proxy (direct HTTP), use stream:false for simple JSON response.
       const useStreaming = useProxy;
 
       const requestBody = {
@@ -84,61 +156,23 @@ export class DirectAIAdapter {
         stream: useStreaming,
         temperature: this.temperature,
       };
-      
-      console.log('\n📤 Complete Request Body:');
-      console.log('  - model:', requestBody.model);
-      console.log('  - messagesCount:', requestBody.messages.length);
-      console.log('  - stream:', requestBody.stream, useStreaming ? '(forced to avoid nginx 504)' : '');
-      console.log('  - temperature:', requestBody.temperature);
-      console.log('\n📋 Full messages structure:');
-      requestBody.messages.forEach((msg, idx) => {
-        console.log(`  [${idx}] role: ${msg.role}, content length: ${msg.content.length}`);
-      });
-      
-      // Determine the correct API endpoint based on model/service
-      let apiEndpoint = '/v1/chat/completions'; // Default for vLLM
-      if (this.model && (this.model.includes('gemma') || this.model.includes('ollama'))) {
-        apiEndpoint = '/api/chat'; // Ollama endpoint
-      }
-      
-      const fullUrl = useProxy 
-        ? '/api/direct-ai-proxy'
-        : `${this.url}${apiEndpoint}`;
-      
-      console.log('\n🌐 Sending HTTP Request:');
-      console.log('  - URL:', fullUrl);
-      console.log('  - Using proxy:', useProxy);
-      console.log('  - Method: POST');
-      console.log('  - Headers:', { 'Content-Type': 'application/json' });
-      console.log('  - Body size:', JSON.stringify(requestBody).length, 'bytes');
-      
-      const requestStartTime = Date.now();
-      
-      const requestPayload = useProxy ? {
-        url: `${this.url}${apiEndpoint}`,
-        body: requestBody
-      } : requestBody;
-      
-      const timeoutSignal = AbortSignal.timeout(600000);
-      const controller = new AbortController();
-      if (options.signal) {
-        options.signal.addEventListener('abort', () => controller.abort());
-      }
-      timeoutSignal.addEventListener('abort', () => controller.abort());
 
-      const response = await fetch(fullUrl, {
+      const reqConfig = this._buildRequestConfig(requestBody);
+      this._logRequestDiagnostics(messages, requestBody, reqConfig);
+
+      const requestStartTime = Date.now();
+      const controller = this._createAbortController(options);
+
+      const response = await fetch(reqConfig.fullUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestPayload),
+        headers: reqConfig.headers,
+        body: JSON.stringify(reqConfig.requestPayload),
         signal: controller.signal
       });
 
-      const requestEndTime = Date.now();
       console.log('\n📥 Response received:');
       console.log('  - Status:', response.status, response.statusText);
-      console.log('  - Time taken:', requestEndTime - requestStartTime, 'ms');
+      console.log('  - Time taken:', Date.now() - requestStartTime, 'ms');
       console.log('  - Headers:', Object.fromEntries(response.headers.entries()));
 
       if (!response.ok) {
@@ -148,61 +182,11 @@ export class DirectAIAdapter {
         console.error('  - Error text:', errorText);
         throw new Error(`Direct AI API error: ${response.status} - ${errorText}`);
       }
-      
+
       // Streaming path: collect full response from SSE stream (keeps nginx alive)
       if (useStreaming) {
         console.log('\n✅ Response OK, collecting streaming response...');
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let fullContent = '';
-        let tokenUsage = null;
-        let chunkCount = 0;
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed || trimmed.startsWith(':')) continue;
-
-              let rawData = trimmed;
-              if (rawData.startsWith('data: ')) {
-                rawData = rawData.slice(6);
-              }
-              if (rawData === '[DONE]') continue;
-
-              try {
-                const parsed = JSON.parse(rawData);
-                // Collect content from both Ollama and OpenAI/vLLM formats
-                const chunk = parsed.message?.content || parsed.choices?.[0]?.delta?.content || '';
-                if (chunk) {
-                  fullContent += chunk;
-                  chunkCount++;
-                }
-                // Collect token usage from Ollama done signal
-                if (parsed.done === true) {
-                  const p = parsed.prompt_eval_count || 0;
-                  const c = parsed.eval_count || 0;
-                  tokenUsage = { prompt_tokens: p, completion_tokens: c, total_tokens: p + c };
-                }
-                // Collect token usage from OpenAI format
-                if (parsed.usage) {
-                  tokenUsage = parsed.usage;
-                }
-              } catch {}
-            }
-          }
-        } finally {
-          reader.releaseLock();
-        }
+        const { fullContent, tokenUsage, chunkCount } = await this._collectStreamResponse(response);
 
         console.log('\n✅ Streaming response collected:');
         console.log('  - Total chunks:', chunkCount);
@@ -223,7 +207,6 @@ export class DirectAIAdapter {
       console.log('\n✅ Response OK, parsing JSON...');
 
       const data = await response.json();
-
       console.log('\n🔍 Raw response diagnostics:');
       console.log('  - Top-level keys:', Object.keys(data || {}));
       console.log('  - Has choices[0].message.content:', !!data?.choices?.[0]?.message?.content);
@@ -241,7 +224,7 @@ export class DirectAIAdapter {
       console.log('='.repeat(80) + '\n');
 
       return { content, usage, done: true, fullText: content };
-      
+
     } catch (error) {
       if (error.name === 'AbortError') {
         console.log('⚠️ Direct AI request was cancelled');
@@ -249,6 +232,91 @@ export class DirectAIAdapter {
       }
       console.error('❌ DirectAIAdapter error:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Collect a full response from an SSE stream (non-yielding, used by chat()).
+   * @private
+   * @param {Response} response - Fetch response with readable stream
+   * @returns {Promise<{fullContent: string, tokenUsage: Object|null, chunkCount: number}>}
+   */
+  async _collectStreamResponse(response) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullContent = '';
+    let tokenUsage = null;
+    let chunkCount = 0;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith(':')) continue;
+
+          let rawData = trimmed;
+          if (rawData.startsWith('data: ')) {
+            rawData = rawData.slice(6);
+          }
+          if (rawData === '[DONE]') continue;
+
+          const parsed = this._parseStreamChunk(rawData);
+          if (!parsed) continue;
+
+          if (parsed.content) {
+            fullContent += parsed.content;
+            chunkCount++;
+          }
+          if (parsed.usage) {
+            tokenUsage = parsed.usage;
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    return { fullContent, tokenUsage, chunkCount };
+  }
+
+  /**
+   * Parse a single SSE/NDJSON chunk from either Ollama or OpenAI/vLLM format.
+   * @private
+   * @param {string} rawData - Raw JSON string (after stripping "data: " prefix)
+   * @returns {{content: string, usage: Object|null, done: boolean}|null}
+   */
+  _parseStreamChunk(rawData) {
+    try {
+      const parsed = JSON.parse(rawData);
+
+      // Ollama signals end via done:true
+      if (parsed.done === true) {
+        let usage = null;
+        if (typeof parsed.prompt_eval_count === 'number' || typeof parsed.eval_count === 'number') {
+          const p = parsed.prompt_eval_count || 0;
+          const c = parsed.eval_count || 0;
+          usage = { prompt_tokens: p, completion_tokens: c, total_tokens: p + c };
+        }
+        return { content: '', usage, done: true };
+      }
+
+      // Content from both Ollama and OpenAI/vLLM formats
+      const content = parsed.choices?.[0]?.delta?.content || parsed.message?.content || '';
+
+      // Token usage (OpenAI/vLLM format, usually in last chunk)
+      const usage = parsed.usage || null;
+
+      return { content, usage, done: false };
+    } catch {
+      return null;
     }
   }
 
@@ -261,100 +329,29 @@ export class DirectAIAdapter {
    */
   async *streamChat(messages, options = {}) {
     try {
-      console.log('\n' + '='.repeat(80));
-      console.log('🤖 DirectAIAdapter: Starting request');
-      console.log('='.repeat(80));
-      console.log('📍 Target URL:', this.url);
-      console.log('📍 Model:', this.model);
-      console.log('📍 Temperature:', this.temperature);
-      console.log('📝 Messages count:', messages.length);
-      
-      // Log system prompt info
-      const systemMessage = messages.find(m => m.role === 'system');
-      if (systemMessage) {
-        console.log('\n✓ System prompt found:');
-        console.log('  - Length:', systemMessage.content.length, 'characters');
-        console.log('  - First 500 chars:', systemMessage.content.substring(0, 500));
-        console.log('  - Last 200 chars:', systemMessage.content.substring(systemMessage.content.length - 200));
-        console.log('  - MD5 hash:', this._simpleHash(systemMessage.content));
-      } else {
-        console.warn('⚠️ No system prompt found in messages!');
-      }
-      
-      // Log user message info
-      const userMessage = messages.find(m => m.role === 'user');
-      if (userMessage) {
-        console.log('\n✓ User message found:');
-        console.log('  - Length:', userMessage.content.length, 'characters');
-        console.log('  - First 300 chars:', userMessage.content.substring(0, 300));
-      }
-      
       const requestBody = {
         model: this.model,
         messages,
         stream: true,
         temperature: this.temperature,
-        // max_tokens: 4000  // 移除限制，让 AI 自由输出
       };
-      
-      console.log('\n📤 Complete Request Body:');
-      console.log('  - model:', requestBody.model);
-      console.log('  - messagesCount:', requestBody.messages.length);
-      console.log('  - stream:', requestBody.stream);
-      console.log('  - temperature:', requestBody.temperature);
-      console.log('  - max_tokens:', requestBody.max_tokens);
-      console.log('\n📋 Full messages structure:');
-      requestBody.messages.forEach((msg, idx) => {
-        console.log(`  [${idx}] role: ${msg.role}, content length: ${msg.content.length}`);
-      });
-      
-      // Use backend proxy to avoid CORS and Mixed Content issues
-      const useProxy = window.location.protocol === 'https:' && this.url.startsWith('http://');
-      
-      // Determine the correct API endpoint based on model/service
-      let apiEndpoint = '/v1/chat/completions'; // Default for vLLM
-      if (this.model && (this.model.includes('gemma') || this.model.includes('ollama'))) {
-        apiEndpoint = '/api/chat'; // Ollama endpoint
-      }
-      
-      const fullUrl = useProxy 
-        ? '/api/direct-ai-proxy'
-        : `${this.url}${apiEndpoint}`;
-      
-      console.log('\n🌐 Sending HTTP Request:');
-      console.log('  - URL:', fullUrl);
-      console.log('  - Using proxy:', useProxy);
-      console.log('  - Method: POST');
-      console.log('  - Headers:', { 'Content-Type': 'application/json' });
-      console.log('  - Body size:', JSON.stringify(requestBody).length, 'bytes');
-      
+
+      const reqConfig = this._buildRequestConfig(requestBody);
+      this._logRequestDiagnostics(messages, requestBody, reqConfig);
+
       const requestStartTime = Date.now();
-      
-      const requestPayload = useProxy ? {
-        url: `${this.url}${apiEndpoint}`,
-        body: requestBody
-      } : requestBody;
-      
-      const timeoutSignal = AbortSignal.timeout(600000);
-      const streamController = new AbortController();
-      if (options.signal) {
-        options.signal.addEventListener('abort', () => streamController.abort());
-      }
-      timeoutSignal.addEventListener('abort', () => streamController.abort());
+      const controller = this._createAbortController(options);
 
-      const response = await fetch(fullUrl, {
+      const response = await fetch(reqConfig.fullUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestPayload),
-        signal: streamController.signal
+        headers: reqConfig.headers,
+        body: JSON.stringify(reqConfig.requestPayload),
+        signal: controller.signal
       });
 
-      const requestEndTime = Date.now();
       console.log('\n📥 Response received:');
       console.log('  - Status:', response.status, response.statusText);
-      console.log('  - Time taken:', requestEndTime - requestStartTime, 'ms');
+      console.log('  - Time taken:', Date.now() - requestStartTime, 'ms');
       console.log('  - Headers:', Object.fromEntries(response.headers.entries()));
 
       if (!response.ok) {
@@ -364,7 +361,7 @@ export class DirectAIAdapter {
         console.error('  - Error text:', errorText);
         throw new Error(`Direct AI API error: ${response.status} - ${errorText}`);
       }
-      
+
       console.log('\n✅ Response OK, starting to stream...');
 
       const reader = response.body.getReader();
@@ -373,9 +370,7 @@ export class DirectAIAdapter {
       let chunkCount = 0;
       let totalContent = '';
       let firstChunkReceived = false;
-      let tokenUsage = null; // 用于存储 token 使用信息
-
-      console.log('\n📡 Starting to read stream...');
+      let tokenUsage = null;
 
       try {
         while (true) {
@@ -390,14 +385,8 @@ export class DirectAIAdapter {
               console.log('  - Token usage:', JSON.stringify(tokenUsage));
             }
             console.log('='.repeat(80) + '\n');
-            
-            // Yield final result with token usage
-            yield {
-              content: '',
-              done: true,
-              fullText: totalContent,
-              usage: tokenUsage
-            };
+
+            yield { content: '', done: true, fullText: totalContent, usage: tokenUsage };
             break;
           }
 
@@ -408,7 +397,6 @@ export class DirectAIAdapter {
           for (const line of lines) {
             if (!line.trim()) continue;
 
-            // Support both OpenAI SSE format (data: {...}) and Ollama NDJSON format ({...})
             let rawData;
             if (line.startsWith('data: ')) {
               rawData = line.slice(6);
@@ -421,77 +409,48 @@ export class DirectAIAdapter {
               if (tokenUsage) {
                 console.log('  - Final token usage:', JSON.stringify(tokenUsage));
               }
-              // Yield final result before returning
-              yield {
-                content: '',
-                done: true,
-                fullText: totalContent,
-                usage: tokenUsage
-              };
+              yield { content: '', done: true, fullText: totalContent, usage: tokenUsage };
               return;
             }
 
-            try {
-              const parsed = JSON.parse(rawData);
+            const parsed = this._parseStreamChunk(rawData);
+            if (!parsed) continue;
 
-              // OpenAI/vLLM streaming: choices[0].delta.content
-              // Ollama streaming: message.content  (with done flag)
-              let content = parsed.choices?.[0]?.delta?.content || parsed.message?.content || '';
+            // Update token usage if provided
+            if (parsed.usage) {
+              tokenUsage = parsed.usage;
+              console.log('\n📊 Token usage received:', JSON.stringify(tokenUsage));
+            }
 
-              // Ollama signals end via done:true
-              if (parsed.done === true) {
-                // Collect Ollama token usage
-                if (typeof parsed.prompt_eval_count === 'number' || typeof parsed.eval_count === 'number') {
-                  const p = parsed.prompt_eval_count || 0;
-                  const c = parsed.eval_count || 0;
-                  tokenUsage = { prompt_tokens: p, completion_tokens: c, total_tokens: p + c };
-                  console.log('\n📊 Ollama token usage received:', JSON.stringify(tokenUsage));
-                }
-                yield {
-                  content: '',
-                  done: true,
-                  fullText: totalContent,
-                  usage: tokenUsage
-                };
-                return;
-              }
-
-              // 提取 OpenAI token 使用信息（通常在最后一个 chunk 或有 finish_reason 的 chunk 中）
+            // Handle Ollama done signal
+            if (parsed.done) {
               if (parsed.usage) {
                 tokenUsage = parsed.usage;
-                console.log('\n📊 Token usage received:', JSON.stringify(tokenUsage));
+                console.log('\n📊 Ollama token usage received:', JSON.stringify(tokenUsage));
+              }
+              yield { content: '', done: true, fullText: totalContent, usage: tokenUsage };
+              return;
+            }
+
+            if (parsed.content) {
+              chunkCount++;
+              totalContent += parsed.content;
+
+              if (!firstChunkReceived) {
+                console.log('\n🎯 First chunk received:');
+                console.log('  - Content:', JSON.stringify(parsed.content));
+                firstChunkReceived = true;
               }
 
-              if (content) {
-                chunkCount++;
-                totalContent += content;
-
-                if (!firstChunkReceived) {
-                  console.log('\n🎯 First chunk received:');
-                  console.log('  - Content:', JSON.stringify(content));
-                  console.log('  - Parsed structure:', JSON.stringify(parsed, null, 2));
-                  firstChunkReceived = true;
-                }
-
-                if (chunkCount % 50 === 0) {
-                  console.log(`  📊 Progress: ${chunkCount} chunks, ${totalContent.length} chars`);
-                }
-
-                // Yield in the same format as AIAdapter
-                yield {
-                  content,
-                  done: false,
-                  fullText: totalContent,
-                  usage: tokenUsage
-                };
+              if (chunkCount % 50 === 0) {
+                console.log(`  📊 Progress: ${chunkCount} chunks, ${totalContent.length} chars`);
               }
-            } catch (e) {
-              console.warn('⚠️ Failed to parse chunk:', e, 'Line:', line);
+
+              yield { content: parsed.content, done: false, fullText: totalContent, usage: tokenUsage };
             }
           }
         }
       } finally {
-        // 确保 reader 被释放
         reader.releaseLock();
         console.log('🔓 Reader lock released');
       }

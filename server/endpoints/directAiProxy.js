@@ -78,6 +78,16 @@ async function _resolveOllamaUrl(originalUrl) {
 function directAiProxyEndpoints(app) {
   if (!app) return;
 
+  // Startup check: warn if VLLM_API_KEY is missing
+  const hasVllmApiKey = !!process.env.VLLM_API_KEY;
+  if (!hasVllmApiKey) {
+    console.warn('[DirectAIProxy] ⚠️ VLLM_API_KEY is not set in environment!');
+    console.warn('[DirectAIProxy]   If vLLM requires authentication, proxy requests will fail with 401.');
+    console.warn('[DirectAIProxy]   Fix: Add VLLM_API_KEY=<your-key> to your .env file and restart the web container.');
+  } else {
+    console.log('[DirectAIProxy] ✔ VLLM_API_KEY is configured');
+  }
+
   app.get(
     "/direct-ai-proxy/health",
     async (_req, res) => {
@@ -105,6 +115,7 @@ function directAiProxyEndpoints(app) {
       }
 
       results.cachedAddr = _cachedOllamaAddr || 'not cached yet';
+      results.vllmApiKeyConfigured = !!process.env.VLLM_API_KEY;
       res.json(results);
     }
   );
@@ -113,7 +124,7 @@ function directAiProxyEndpoints(app) {
     "/direct-ai-proxy",
     async (request, response) => {
       try {
-        const { url, body } = request.body;
+        const { url, body, apiKey } = request.body;
 
         if (!url || !body) {
           return response.status(400).json({
@@ -121,7 +132,15 @@ function directAiProxyEndpoints(app) {
           });
         }
 
+        // Resolve API key: frontend-passed > server env > none
+        const resolvedApiKey = apiKey || process.env.VLLM_API_KEY || null;
+
         console.log('[DirectAIProxy] Proxying request to:', url);
+        console.log('[DirectAIProxy] Has API Key:', !!resolvedApiKey);
+        if (!resolvedApiKey && url && url.includes('/v1/chat/completions')) {
+          console.warn('[DirectAIProxy] ⚠️ No API key available for vLLM/OpenAI endpoint — likely to get 401 Unauthorized');
+          console.warn('[DirectAIProxy]   Fix: Set VLLM_API_KEY in docker-compose environment or .env file');
+        }
         console.log('[DirectAIProxy] Request body (first 200):', JSON.stringify(body).substring(0, 200));
         if (body && body.messages) {
           console.log('[DirectAIProxy] Messages received:', body.messages.length);
@@ -133,20 +152,15 @@ function directAiProxyEndpoints(app) {
           console.warn('[DirectAIProxy] ⚠️ No messages in request body!');
         }
 
-        const isOllamaPort = url && url.includes(':11434');
-        const isOllama = isOllamaPort || (body.model && (
-          body.model.includes('gemma') ||
-          body.model.includes('ollama') ||
-          body.model.includes('llama') ||
-          body.model.includes('mistral') ||
-          body.model.includes('qwen') ||
-          body.model.includes('phi')
-        ));
+        // 通过 URL 路径判断 API 格式，避免模型名误判
+        const isOllama = url && url.includes('/api/chat');
+        const isOpenAI = url && url.includes('/v1/chat/completions');
 
         let targetUrl = url;
         let transformedBody = body;
 
         if (isOllama) {
+          // Ollama 格式：需要转换请求体
           targetUrl = await _resolveOllamaUrl(url);
           console.log('[DirectAIProxy] Resolved Ollama target:', targetUrl);
 
@@ -160,20 +174,45 @@ function directAiProxyEndpoints(app) {
             }
           };
           console.log('[DirectAIProxy] Transformed to Ollama format');
-          if (transformedBody.messages) {
-            console.log('[DirectAIProxy] Sending to Ollama, messages:', transformedBody.messages.length);
-            transformedBody.messages.forEach((m, i) => {
-              const len = typeof m.content === 'string' ? m.content.length : 0;
-              console.log(`[DirectAIProxy]   [${i}] role=${m.role}, content_length=${len}`);
-            });
+        } else if (isOpenAI) {
+          // OpenAI/vLLM 格式：无需转换，保持原样
+          console.log('[DirectAIProxy] OpenAI format detected, no transformation needed');
+        } else {
+          // 未知格式：尝试通过端口判断（兼容旧逻辑）
+          const isOllamaPort = url && url.includes(':11434');
+          if (isOllamaPort) {
+            targetUrl = await _resolveOllamaUrl(url);
+            console.log('[DirectAIProxy] Fallback: resolved Ollama target:', targetUrl);
+            transformedBody = {
+              model: body.model,
+              messages: body.messages,
+              stream: body.stream !== false,
+              temperature: typeof body.temperature === 'number' ? body.temperature : 0.7,
+              options: {
+                num_ctx: body.options?.num_ctx || 32768
+              }
+            };
           }
+        }
+
+        if (transformedBody.messages) {
+          console.log('[DirectAIProxy] Sending to Ollama, messages:', transformedBody.messages.length);
+          transformedBody.messages.forEach((m, i) => {
+            const len = typeof m.content === 'string' ? m.content.length : 0;
+            console.log(`[DirectAIProxy]   [${i}] role=${m.role}, content_length=${len}`);
+          });
+        }
+
+        const proxyHeaders = {
+          'Content-Type': 'application/json',
+        };
+        if (resolvedApiKey) {
+          proxyHeaders['Authorization'] = `Bearer ${resolvedApiKey}`;
         }
 
         const backendResponse = await fetch(targetUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: proxyHeaders,
           body: JSON.stringify(transformedBody),
           signal: AbortSignal.timeout(PROXY_TIMEOUT),
           dispatcher: proxyAgent,
@@ -182,6 +221,19 @@ function directAiProxyEndpoints(app) {
         if (!backendResponse.ok) {
           const errorText = await backendResponse.text();
           console.error('[DirectAIProxy] Backend error:', backendResponse.status, errorText);
+
+          // Provide actionable error message for 401 Unauthorized
+          if (backendResponse.status === 401) {
+            const hint = !resolvedApiKey
+              ? 'VLLM_API_KEY is not configured. Set VLLM_API_KEY in your docker-compose .env file and restart the web container.'
+              : 'The provided API key was rejected by the backend. Check that VLLM_API_KEY matches the key configured on the vLLM service.';
+            console.error('[DirectAIProxy] Auth hint:', hint);
+            return response.status(401).json({
+              error: `Authentication failed (401): ${hint}`,
+              hint
+            });
+          }
+
           return response.status(backendResponse.status).json({
             error: `Backend error: ${backendResponse.status} - ${errorText}`
           });

@@ -46,7 +46,7 @@ export const getAIConfig = () => {
       mode: 'direct',
       url: import.meta.env.VITE_DIRECT_AI_URL || 'http://vllm:8000',
       model: import.meta.env.VITE_DIRECT_AI_MODEL || 'gpt-oss-20b',
-      apiKey: null,
+      apiKey: import.meta.env.VITE_DIRECT_AI_API_KEY || null,
       temperature: 0  // 确定性输出，确保检测结果的一致性（与SnailAI保持一致）
     };
   } else {
