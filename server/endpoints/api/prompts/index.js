@@ -3,8 +3,8 @@ const { readFileSync, statSync } = require("fs");
 const { join } = require("path");
 
 /**
- * GET /api/prompts/ue-static-defect?type=ue_cpp|ue_blueprint
- * Get the UE5 static defect detection prompt template
+ * GET /api/prompts/ue-static-defect?type=ue_cpp|ue_blueprint|cpp
+ * Get the UE5 / Standard C++ static defect detection prompt template
  */
 function apiPromptsEndpoints(router) {
   if (!router) return;
@@ -15,10 +15,10 @@ function apiPromptsEndpoints(router) {
       const projectType = req.query.type || 'ue_cpp';
       
       // Validate project type
-      if (!['ue_cpp', 'ue_blueprint'].includes(projectType)) {
+      if (!['ue_cpp', 'ue_blueprint', 'cpp'].includes(projectType)) {
         return res.status(400).json({
           error: "Invalid project type",
-          message: "Project type must be 'ue_cpp' or 'ue_blueprint'",
+          message: "Project type must be 'ue_cpp', 'ue_blueprint' or 'cpp'",
           received: projectType,
         });
       }
@@ -26,7 +26,9 @@ function apiPromptsEndpoints(router) {
       // Determine prompt file name based on project type
       const promptFileName = projectType === 'ue_blueprint' 
         ? 'ue5_blueprint_prompt.md' 
-        : 'ue5_cpp_prompt.md';
+        : projectType === 'cpp'
+          ? 'cpp_prompt.md'
+          : 'ue5_cpp_prompt.md';
 
       console.log(`📝 Loading prompt for project type: ${projectType} (${promptFileName})`);
 
