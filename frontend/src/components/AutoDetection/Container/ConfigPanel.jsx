@@ -316,6 +316,9 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
             <option value="ue_blueprint">
               {t("autodetection.config.projectType.ueBlueprint", "UE5 Blueprint Project")}
             </option>
+            <option value="cpp">
+              {t("autodetection.config.projectType.cpp", "标准 C++ 项目 (Standard C++)")}
+            </option>
           </select>
           {errors.projectType && (
             <p className="mt-1 text-sm text-red-600">{errors.projectType}</p>

@@ -146,8 +146,8 @@ class ConfigStorage {
     }
 
     // 🔧 添加 projectType 验证
-    if (typeof config.projectType !== 'string' || !['ue_cpp', 'ue_blueprint'].includes(config.projectType)) {
-      console.warn('projectType must be either "ue_cpp" or "ue_blueprint"');
+    if (typeof config.projectType !== 'string' || !['ue_cpp', 'ue_blueprint', 'cpp'].includes(config.projectType)) {
+      console.warn('projectType must be either "ue_cpp", "ue_blueprint" or "cpp"');
       return false;
     }
 

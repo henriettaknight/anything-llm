@@ -46,6 +46,10 @@ import tokenStatisticsService from './tokenStatisticsService.js';
  * @property {number} summary.depr - DEPR category count
  * @property {number} summary.perf - PERF category count
  * @property {number} summary.class - CLASS category count
+ * @property {number} summary.compile - COMPILE category count
+ * @property {number} summary.security - SECURITY category count (网络协议索引约束)
+ * @property {number} summary.seq - SEQ category count (动作/事件时序顺序)
+ * @property {number} summary.initord - INITORD category count (跨实体初始化时序)
  */
 
 /**
@@ -74,8 +78,8 @@ export const initializeServices = (aiService, logService) => {
  */
 async function getUEDefectDetectionPrompt(projectType) {
   // Validate projectType
-  if (!projectType || !['ue_cpp', 'ue_blueprint'].includes(projectType)) {
-    throw new Error(`Invalid project type: ${projectType}. Must be 'ue_cpp' or 'ue_blueprint'`);
+  if (!projectType || !['ue_cpp', 'ue_blueprint', 'cpp'].includes(projectType)) {
+    throw new Error(`Invalid project type: ${projectType}. Must be 'ue_cpp', 'ue_blueprint' or 'cpp'`);
   }
 
   try {
@@ -87,9 +91,11 @@ async function getUEDefectDetectionPrompt(projectType) {
     
     if (response.ok) {
       const prompt = await response.text();
-      const promptFile = projectType === 'ue_cpp' 
-        ? (userLang === 'zh' ? 'ue5_cpp_prompt.md' : 'ue5_cpp_prompt_en.md')
-        : (userLang === 'zh' ? 'ue5_blueprint_prompt.md' : 'ue5_blueprint_prompt_en.md');
+      const promptFile = projectType === 'cpp'
+        ? (userLang === 'zh' ? 'cpp_prompt.md' : 'cpp_prompt_en.md')
+        : projectType === 'ue_cpp' 
+          ? (userLang === 'zh' ? 'ue5_cpp_prompt.md' : 'ue5_cpp_prompt_en.md')
+          : (userLang === 'zh' ? 'ue5_blueprint_prompt.md' : 'ue5_blueprint_prompt_en.md');
       serverLog?.info(`✓ 成功从 API 获取提示词，长度: ${prompt.length} 字符`);
       serverLog?.info(`✓ 提示词来源: ${promptFile} 文件`);
       return prompt;
@@ -240,7 +246,7 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
 
     // If it's a .h file, try to find corresponding .cpp file (only for C++ projects)
     let pairedFile = null;
-    if (projectType === 'ue_cpp' && fileInfo.name.endsWith('.h') && directoryHandle) {
+    if (['ue_cpp', 'cpp'].includes(projectType) && fileInfo.name.endsWith('.h') && directoryHandle) {
       pairedFile = await findPairedImplementationFile(fileInfo, directoryHandle);
     }
 
@@ -795,7 +801,7 @@ function parseDefectDetectionResults(response, filePath) {
       
       // Relaxed column count requirement: as long as there's category and description, consider it valid
       if (columns.length >= 2) {
-        const validCategories = ['AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR', 'PERF', 'CLASS'];
+        const validCategories = ['AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR', 'PERF', 'CLASS', 'COMPILE', 'SECURITY', 'SEQ', 'INITORD'];
         const category = columns[1] || 'UNKNOWN';
         
         serverLog?.info(`[DEBUG] 检查 Category: ${category}, 是否有效: ${validCategories.includes(category)}`);
@@ -889,7 +895,7 @@ function parseDefectDetectionResults(response, filePath) {
  */
 function parseChineseTableFormat(response, filePath) {
   const defects = [];
-  const validCategories = ['AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR', 'PERF', 'CLASS'];
+  const validCategories = ['AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR', 'PERF', 'CLASS', 'COMPILE', 'SECURITY', 'SEQ', 'INITORD'];
   
   // Map Chinese category names to English
   const chineseCategoryMap = {
@@ -987,7 +993,7 @@ function parseChineseTableFormat(response, filePath) {
  */
 function parseListFormatDefects(response, filePath) {
   const defects = [];
-  const validCategories = ['AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR', 'PERF', 'CLASS'];
+  const validCategories = ['AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR', 'PERF', 'CLASS', 'COMPILE', 'SECURITY', 'SEQ', 'INITORD'];
   
   // Find defect block pattern: #### 缺陷 (第X行) or similar format
   const defectBlocks = response.split(/####?\s*缺陷\s*\([^)]+\)/gi);
@@ -1146,7 +1152,7 @@ function isPlaceholderContent(values) {
  */
 function parseLooseFormatDefects(response, filePath) {
   const defects = [];
-  const validCategories = ['AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR', 'PERF', 'CLASS'];
+  const validCategories = ['AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR', 'PERF', 'CLASS', 'COMPILE', 'SECURITY', 'SEQ', 'INITORD'];
   
   // Find all possible defect description patterns
   const defectPatterns = [
@@ -1230,7 +1236,7 @@ export async function detectDefectsInFiles(files, directoryHandle, onProgress, p
     defectsFound: 0,
     defects: [],
     projectType: projectType,
-    summary: projectType === 'ue_cpp' ? {
+    summary: (projectType === 'ue_cpp' || projectType === 'cpp') ? {
       auto: 0,
       array: 0,
       memf: 0,
@@ -1239,7 +1245,11 @@ export async function detectDefectsInFiles(files, directoryHandle, onProgress, p
       stl: 0,
       depr: 0,
       perf: 0,
-      class: 0
+      class: 0,
+      compile: 0,
+      security: 0,
+      seq: 0,
+      initord: 0
     } : {
       null: 0,
       tick: 0,
