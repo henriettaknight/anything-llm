@@ -56,6 +56,18 @@ import tokenStatisticsService from './tokenStatisticsService.js';
  * @typedef {CodeDetectionReport & {groupName: string, groupPath: string}} GroupDetectionReport
  */
 
+/**
+ * 给代码文本注入绝对行号前缀，每行前置 `L{行号}: `。
+ * 让模型直接读到真实绝对行号，从源头消灭"靠数数计数导致的行号漂移"。
+ * 行号从 1 开始，以原始文件文本计（与 locateSnippetInFile 的 fileContent 一致）。
+ * @param {string} raw 原始代码（不含行号前缀）
+ * @returns {string} 带行号前缀的代码
+ */
+function withLineNumbers(raw) {
+  const lines = String(raw ?? "").split("\n");
+  return lines.map((line, i) => `L${i + 1}: ${line}`).join("\n");
+}
+
 // Placeholder for AI service - will be replaced with actual implementation
 let codeReviewAIService = null;
 let serverLog = null;
@@ -267,20 +279,22 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
 文件大小：${content.length} 字符
 
 \`\`\`cpp
-${content}
+${withLineNumbers(content)}
 \`\`\`
 
 **实现文件：${pairedFile.path}**
 文件大小：${pairedFile.content.length} 字符
 
 \`\`\`cpp
-${pairedFile.content}
+${withLineNumbers(pairedFile.content)}
 \`\`\`
 
 **重要提示：**
-- 这是配对的头文件和实现文件，请一起分析
+- 这是配对的头文件和实现文件，请一起分析（代码块每行已标注真实行号，头文件与实现文件各自独立编号）
 - 检查成员变量时，请查看构造函数（在实现文件中）是否已初始化
 - 只报告真正未初始化的成员变量，不要报告已在构造函数中初始化的变量
+- \`lines\` 字段请直接照抄代码块中对应行的真实行号（如 "L120" 或 "L118-L125"），不得自行估算
+- \`snippet\` 字段只写纯净代码，不要带 \`L{n}:\` 行号前缀
 
 请按照指定的缺陷类别进行检测，**严格以 JSON 数组输出**，每个对象包含字段：no、category、file、function、snippet、lines、risk、howToTrigger、suggestedFix、confidence。**只输出 JSON，不要返回 Markdown 或其他说明。**`;
       } else {
@@ -290,20 +304,22 @@ ${pairedFile.content}
 File size: ${content.length} characters
 
 \`\`\`cpp
-${content}
+${withLineNumbers(content)}
 \`\`\`
 
 **Implementation file: ${pairedFile.path}**
 File size: ${pairedFile.content.length} characters
 
 \`\`\`cpp
-${pairedFile.content}
+${withLineNumbers(pairedFile.content)}
 \`\`\`
 
 **Important notes:**
-- These are paired header and implementation files, please analyze them together
+- These are paired header and implementation files, please analyze them together (each line in the blocks is prefixed with its real line number; header and implementation are numbered independently)
 - When checking member variables, please check if they are initialized in the constructor (in the implementation file)
 - Only report truly uninitialized member variables, do not report variables already initialized in the constructor
+- For the \`lines\` field, copy the real line numbers shown in the blocks (e.g. "L120" or "L118-L125"); do not estimate
+- For the \`snippet\` field, write pure code only, without the \`L{n}:\` line-number prefix
 
 Detect defects by the specified categories and **output strictly as a JSON array only**, each object with fields: no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence. **Do not return Markdown or any extra text.**`;
       }
@@ -317,10 +333,11 @@ Detect defects by the specified categories and **output strictly as a JSON array
 
 代码内容：
 \`\`\`cpp
-${content}
+${withLineNumbers(content)}
 \`\`\`
 
-请按照指定的缺陷类别进行检测，**严格以 JSON 数组输出**，每个对象字段：no、category、file、function、snippet、lines、risk、howToTrigger、suggestedFix、confidence。**只输出 JSON，不要返回 Markdown 或其他说明。**`;
+请按照指定的缺陷类别进行检测，**严格以 JSON 数组输出**，每个对象字段：no、category、file、function、snippet、lines、risk、howToTrigger、suggestedFix、confidence。**只输出 JSON，不要返回 Markdown 或其他说明。**
+注意：代码块每行已标注真实行号，\`lines\` 字段请直接照抄（如 "L120" 或 "L118-L125"），\`snippet\` 字段只写纯净代码，不要带 \`L{n}:\` 行号前缀。`;
       } else {
         userMessage = `Please perform static defect detection on the following C++ code file:
 
@@ -329,10 +346,11 @@ File size: ${content.length} characters
 
 Code content:
 \`\`\`cpp
-${content}
+${withLineNumbers(content)}
 \`\`\`
 
-Detect defects by the specified categories and **output strictly as a JSON array only**, each object with fields: no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence. **Do not return Markdown or any extra text.**`;
+Detect defects by the specified categories and **output strictly as a JSON array only**, each object with fields: no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence. **Do not return Markdown or any extra text.**
+Note: each line in the block is prefixed with its real line number; for \`lines\` copy it directly (e.g. "L120" or "L118-L125"), and for \`snippet\` write pure code without the \`L{n}:\` prefix.`;
       }
     }
 
@@ -492,7 +510,28 @@ Detect defects by the specified categories and **output strictly as a JSON array
     }
 
     serverLog?.info(`文件 ${fileInfo.name} 检测完成，发现 ${defects.length} 个缺陷`);
-    
+
+    // 🔧 A: 用 snippet 在真实源文件反查行号（按 defect.file 选择 .h 或 .cpp 内容）
+    if (defects.length > 0) {
+      defects = defects.map((defect) => {
+        const isPairedCpp = pairedFile && defect.file && defect.file.endsWith('.cpp') && defect.file !== fileInfo.path;
+        const targetContent = isPairedCpp ? pairedFile.content : content;
+        const altContent = isPairedCpp ? content : (pairedFile ? pairedFile.content : null);
+        const located = locateSnippetInFile(defect.snippet, targetContent, altContent);
+        if (located.located) {
+          return { ...defect, lines: located.lines, linesFromModel: false };
+        }
+        // 反查失败：保留模型原值并标记，便于排查
+        return { ...defect, linesFromModel: true };
+      });
+      // 🔧 B: 单文件内去重
+      const before = defects.length;
+      defects = deduplicateDefects(defects);
+      if (defects.length < before) {
+        serverLog?.info(`文件 ${fileInfo.name} 单文件内去重移除 ${before - defects.length} 个重复缺陷`);
+      }
+    }
+
     return defects;
 
   } catch (error) {
@@ -885,6 +924,132 @@ function parseDefectDetectionResults(response, filePath) {
   console.log('🔧'.repeat(40) + '\n');
   serverLog?.info('未发现缺陷（AI响应格式无法解析或确实没有缺陷）');
   return defects;
+}
+
+/**
+ * 🔧 用 snippet 在真实源文件中反查起止行号，校正模型盲猜的 lines
+ * @param {string} snippet - 模型给出的代码片段
+ * @param {string} fileContent - 主文件内容（.h 或单独 .cpp）
+ * @param {string|null} [altContent] - 配对文件内容（.cpp），主文件未命中时再查
+ * @returns {{lines: string, located: boolean, usedAlt: boolean}}
+ */
+function locateSnippetInFile(snippet, fileContent, altContent = null) {
+  const fallback = { lines: '', located: false, usedAlt: false };
+  if (!snippet || (!fileContent && !altContent)) return fallback;
+
+  // 归一化并按"原始行号"建立索引：去行/块注释、压缩连续空白，空行丢弃。
+  // 关键：返回的是真实行号，而非归一化数组下标（注释/空行会让二者错位）。
+  const buildLines = (s) => {
+    const raw = (s || '').split('\n');
+    const out = [];
+    for (let idx = 0; idx < raw.length; idx++) {
+      const n = raw[idx]
+        .replace(/^\s*L\d+:\s*/, '')   // 剥离注入的行号前缀（双保险，防止模型把 L{n}: 带进 snippet）
+        .replace(/\/\/.*$/, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .trim()
+        .replace(/\s+/g, ' ');
+      if (n.length > 0) out.push({ norm: n, line: idx + 1 });
+    }
+    return out;
+  };
+
+  const snippetLines = buildLines(snippet).map((d) => d.norm);
+  if (snippetLines.length === 0) return fallback;
+
+  const tryLocate = (content) => {
+    if (!content) return null;
+    const fileLines = buildLines(content);
+    // 单行 snippet：退化为子串匹配
+    if (snippetLines.length === 1) {
+      const target = snippetLines[0];
+      for (const fl of fileLines) {
+        if (fl.norm.includes(target)) return { start: fl.line, end: fl.line };
+      }
+      return null;
+    }
+    // 多行 snippet：以全部行作为窗口在文件行中滑动匹配
+    const winLen = snippetLines.length;
+    for (let i = 0; i + winLen <= fileLines.length; i++) {
+      let match = true;
+      for (let j = 0; j < winLen; j++) {
+        if (fileLines[i + j].norm.indexOf(snippetLines[j]) === -1) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return { start: fileLines[i].line, end: fileLines[i + winLen - 1].line };
+    }
+    // 退化：只用 snippet 首行子串定位起点
+    const first = snippetLines[0];
+    for (const fl of fileLines) {
+      if (fl.norm.includes(first)) return { start: fl.line, end: fl.line };
+    }
+    return null;
+  };
+
+  let range = tryLocate(fileContent);
+  let usedAlt = false;
+  if (!range && altContent) {
+    range = tryLocate(altContent);
+    usedAlt = true;
+  }
+  if (!range) return fallback;
+
+  const lines = range.start === range.end ? `L${range.start}` : `L${range.start}-L${range.end}`;
+  return { lines, located: true, usedAlt };
+}
+
+/**
+ * 字段完整性评分：用于去重时同键同置信度下保留信息更完整者
+ * @param {Object} d - DefectDetectionResult
+ * @returns {number}
+ */
+function snippetFieldRichness(d) {
+  const fields = [d.category, d.file, d.function, d.snippet, d.lines, d.risk, d.howToTrigger, d.suggestedFix, d.confidence];
+  return fields.reduce((acc, v) => acc + (v ? 1 : 0), 0);
+}
+
+/**
+ * 🔧 以「文件 + 类别 + snippet 归一化」为键合并重复缺陷。
+ * 模型盲猜的 lines 不可靠，故不作为去重键；同键保留置信度最高者。
+ * @param {Array} list - DefectDetectionResult[]
+ * @returns {DefectDetectionResult[]}
+ */
+export function deduplicateDefects(list) {
+  if (!Array.isArray(list) || list.length <= 1) return list || [];
+
+  const confRank = { High: 3, Medium: 2, Low: 1 };
+  const normKey = (s) => (s || '')
+    .replace(/\/\/.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  // djb2 散列，避免长 snippet 直接做对象键
+  const hash = (s) => {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  };
+  const basename = (p) => (p || '').split('/').pop().split('\\').pop().toLowerCase();
+
+  const map = new Map();
+  for (const d of list) {
+    const key = `${basename(d.file)}|${String(d.category || '').toUpperCase()}|${hash(normKey(d.snippet))}`;
+    if (!map.has(key)) {
+      map.set(key, d);
+    } else {
+      const existing = map.get(key);
+      const rc = confRank[String(d.confidence || 'Medium').trim()] || 2;
+      const re = confRank[String(existing.confidence || 'Medium').trim()] || 2;
+      // 置信度高者胜；相同则字段更完整者胜
+      if (rc > re || (rc === re && snippetFieldRichness(d) > snippetFieldRichness(existing))) {
+        map.set(key, d);
+      }
+    }
+  }
+  return Array.from(map.values());
 }
 
 /**
@@ -1303,13 +1468,14 @@ export async function detectDefectsInFiles(files, directoryHandle, onProgress, p
     // Merge results (handle Promise.allSettled results)
     for (const result of batchResults) {
       if (result.status === 'fulfilled') {
-        const fileDefects = result.value;
+        // 🔧 B: 汇总前去重（与单文件去重叠加，根除跨文件/同组重复），再统计
+        const fileDefects = deduplicateDefects(result.value);
         report.defects.push(...fileDefects);
-        
+
         // Update statistics
         for (const defect of fileDefects) {
           report.defectsFound++;
-          
+
           // Count by category
           const category = defect.category.toLowerCase();
           if (category in report.summary) {

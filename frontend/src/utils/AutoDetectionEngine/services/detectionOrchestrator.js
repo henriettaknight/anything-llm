@@ -5,12 +5,13 @@
 
 import { scanDirectoryByGroups, filterFiles } from './fileMonitorService.js';
 import { createBatchProcessor } from './batchProcessingService.js';
-import { detectDefectsInFile } from './codeDetectionService.js';
+import { detectDefectsInFile, deduplicateDefects } from './codeDetectionService.js';
 import { resumeDetectionService } from './resumeDetectionService.js';
 import SessionStorage, { SessionStatus } from '../storage/sessionStorage.js';
 import { resourceMonitorService } from './resourceMonitorService.js';
 import tokenStatisticsService from './tokenStatisticsService.js';
 import zipPackageService from './zipPackageService.js';
+import { serverLog } from './serverLogService.js';
 
 /**
  * @typedef {Object} DetectionSession
@@ -379,7 +380,8 @@ class DetectionOrchestratorImpl {
           
           batchResults.forEach(r => {
             if (r.defects && r.defects.length > 0) {
-              allDefects.push(...r.defects);
+              // 🔧 B: 统一报告聚合并兜底去重，根除跨分组/根目录重复
+              allDefects.push(...deduplicateDefects(r.defects));
             }
             allFileResults.push({
               file: r.filePath || r.file?.path,
@@ -587,8 +589,14 @@ class DetectionOrchestratorImpl {
   async processGroup(group, directoryHandle, onReportGenerated) {
     const { name, path, files } = group;
     
+    // 🔧 C: 配对源头去重——.h 会合并其同名 .cpp 一起检测，故从独立检测清单移除该 .cpp
+    const detectionFiles = this._filterPairedImplementationFiles(files);
+    if (detectionFiles.length !== files.length) {
+      serverLog?.info(`配对源头去重：从独立检测清单移除 ${files.length - detectionFiles.length} 个被 .h 配对的实现文件`);
+    }
+
     // Create batches with pairing logic
-    const batches = this.batchProcessor.createBatches(files);
+    const batches = this.batchProcessor.createBatches(detectionFiles);
     console.log(`创建了 ${batches.length} 个批次`);
 
     // Update session with batch info
@@ -670,6 +678,36 @@ class DetectionOrchestratorImpl {
       batches: processedBatches,
       aggregated
     };
+  }
+
+  /**
+   * 🔧 配对源头去重 C：从待检测文件列表移除"已被同名 .h 配对的 .cpp"，
+   * 避免 .h 合并 .cpp 检测后 .cpp 又被单独检测一次造成的"双边重复"。
+   * @param {Array} files - 文件列表（含 name/path 字段）
+   * @returns {Array} 过滤后的文件列表
+   */
+  _filterPairedImplementationFiles(files) {
+    if (!Array.isArray(files) || files.length === 0) return files;
+    const headerBases = new Set();
+    for (const f of files) {
+      if (f && f.name && f.name.toLowerCase().endsWith('.h')) {
+        headerBases.add(f.name.substring(0, f.name.lastIndexOf('.')).toLowerCase());
+      }
+    }
+    if (headerBases.size === 0) return files;
+    const implExts = ['.cpp', '.cc', '.cxx'];
+    return files.filter((f) => {
+      if (!f || !f.name) return true;
+      const lower = f.name.toLowerCase();
+      const dot = lower.lastIndexOf('.');
+      if (dot <= 0) return true;
+      const ext = lower.substring(dot);
+      if (implExts.includes(ext)) {
+        const base = lower.substring(0, dot);
+        if (headerBases.has(base)) return false; // 已被同名 .h 配对，剔除独立检测
+      }
+      return true;
+    });
   }
 
   /**
