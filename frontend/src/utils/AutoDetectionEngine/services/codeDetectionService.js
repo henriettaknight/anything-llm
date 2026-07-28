@@ -59,13 +59,15 @@ import tokenStatisticsService from './tokenStatisticsService.js';
 /**
  * 给代码文本注入绝对行号前缀，每行前置 `L{行号}: `。
  * 让模型直接读到真实绝对行号，从源头消灭"靠数数计数导致的行号漂移"。
- * 行号从 1 开始，以原始文件文本计（与 locateSnippetInFile 的 fileContent 一致）。
+ * 行号从 startLine 开始，以原始文件文本计（与 locateSnippetInFile 的 fileContent 一致）。
+ * 大文件分块送审时，逐块用真实绝对起始行号注入，使块内行号与原始文件对齐。
  * @param {string} raw 原始代码（不含行号前缀）
+ * @param {number} [startLine=1] 起始绝对行号（块模式传块在原始文件中的起始行）
  * @returns {string} 带行号前缀的代码
  */
-function withLineNumbers(raw) {
+export function withLineNumbers(raw, startLine = 1) {
   const lines = String(raw ?? "").split("\n");
-  return lines.map((line, i) => `L${i + 1}: ${line}`).join("\n");
+  return lines.map((line, i) => `L${startLine + i}: ${line}`).join("\n");
 }
 
 // Placeholder for AI service - will be replaced with actual implementation
@@ -84,11 +86,29 @@ export const initializeServices = (aiService, logService) => {
 };
 
 /**
+ * 获取已初始化的代码审查 AI 服务实例（DualModeAIAdapter）。
+ * 供大文件分块送审服务复用同一 adapter，避免重复创建。
+ * @returns {Object|null}
+ */
+export function getCodeReviewAIService() {
+  return codeReviewAIService;
+}
+
+/**
+ * 获取已初始化的服务端日志实例。
+ * 供大文件分块送审服务输出分块/覆盖率日志。
+ * @returns {Object|null}
+ */
+export function getServerLog() {
+  return serverLog;
+}
+
+/**
  * Get UE static defect detection system prompt
  * @param {string} projectType - Project type ('ue_cpp' or 'ue_blueprint')
  * @returns {Promise<string>} - System prompt
  */
-async function getUEDefectDetectionPrompt(projectType) {
+export async function getUEDefectDetectionPrompt(projectType) {
   // Validate projectType
   if (!projectType || !['ue_cpp', 'ue_blueprint', 'cpp'].includes(projectType)) {
     throw new Error(`Invalid project type: ${projectType}. Must be 'ue_cpp', 'ue_blueprint' or 'cpp'`);
@@ -260,6 +280,30 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
     let pairedFile = null;
     if (['ue_cpp', 'cpp'].includes(projectType) && fileInfo.name.endsWith('.h') && directoryHandle) {
       pairedFile = await findPairedImplementationFile(fileInfo, directoryHandle);
+    }
+
+    // ===== 大文件闸门：本地预分块送审（第一阶段）=====
+    // 仅对"非配对的大单文件"启用分块，避免重写依赖配对逻辑；配对（头+实现）沿用原合并 inline 路径。
+    try {
+      const { detectLargeFileDefects, SINGLE_FILE_CHUNK_THRESHOLD: CHUNK_THRESHOLD } = await import('./largeFileDetectionService.js');
+      const estTokens = Math.floor((content?.length || 0) / 4);
+      const estLines = lineStats ? lineStats.totalLines : (content || '').split('\n').length;
+      const estSize = Math.max(estTokens, estLines);
+      if (!pairedFile && estSize > CHUNK_THRESHOLD) {
+        serverLog?.info(`[大文件闸门] ${fileInfo.name} 估算规模 ${estSize}（字符${content.length}/行${estLines}）超过阈值 ${CHUNK_THRESHOLD}，进入本地预分块送审`);
+        const chunkResult = await detectLargeFileDefects({ fileInfo, directoryHandle, fileContent: content, projectType });
+        if (chunkResult && chunkResult.coverage) {
+          const cov = chunkResult.coverage;
+          serverLog?.info(`[大文件闸门] ${fileInfo.name} 分块完成：缺陷 ${chunkResult.defects.length}，成功块 ${cov.successChunks}/${cov.totalChunks}，覆盖行 ${cov.coveredLines}/${cov.totalLines}`);
+          if (!cov.fullyCovered) {
+            serverLog?.warn(`[大文件闸门] ${fileInfo.name} 存在未覆盖分块（覆盖率不足），缺陷可能不完整`);
+          }
+        }
+        return chunkResult ? chunkResult.defects : [];
+      }
+    } catch (gateError) {
+      serverLog?.error(`[大文件闸门] 分块送审异常，回退原整文件流程: ${fileInfo.name}`, gateError);
+      // 继续走下方原 inline 逻辑
     }
 
     // Get system prompt (must pass projectType)
@@ -687,7 +731,7 @@ function recordTokenStatisticsOnFailure(
  * @param {string} response
  * @returns {boolean}
  */
-function isPromptAckOrMetaResponse(response) {
+export function isPromptAckOrMetaResponse(response) {
   const text = (response || '').toLowerCase();
   if (!text) return false;
 
@@ -715,7 +759,7 @@ function isPromptAckOrMetaResponse(response) {
  * @param {string} filePath - File path
  * @returns {DefectDetectionResult[]} - List of parsed defects
  */
-function parseDefectDetectionResults(response, filePath) {
+export function parseDefectDetectionResults(response, filePath) {
   const defects = [];
   
   console.log('\n' + '🔧'.repeat(40));
@@ -766,6 +810,8 @@ function parseDefectDetectionResults(response, filePath) {
           howToTrigger: item.howToTrigger || '',
           suggestedFix: item.suggestedFix || '',
           confidence: item.confidence || 'Medium',
+          xline: typeof item.xline === 'number' ? item.xline : (typeof item.xline === 'string' ? parseInt(item.xline, 10) || 0 : 0),
+          xfunc: item.xfunc || '',
         }));
         console.log(`  ✅ JSON array parsed: ${jsonDefects.length} defects`);
         console.log('🔧'.repeat(40) + '\n');
@@ -933,7 +979,7 @@ function parseDefectDetectionResults(response, filePath) {
  * @param {string|null} [altContent] - 配对文件内容（.cpp），主文件未命中时再查
  * @returns {{lines: string, located: boolean, usedAlt: boolean}}
  */
-function locateSnippetInFile(snippet, fileContent, altContent = null) {
+export function locateSnippetInFile(snippet, fileContent, altContent = null) {
   const fallback = { lines: '', located: false, usedAlt: false };
   if (!snippet || (!fileContent && !altContent)) return fallback;
 

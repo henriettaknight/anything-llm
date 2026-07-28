@@ -381,35 +381,45 @@ Only report the following 6 situations where objects may be null and unchecked:
 - P2: Architecture issues or best practices (INTERFACE/UI/ANIM/CAST)
 
 ## Output Report Format (Strictly Follow)
-Output as Markdown table, one row per entry, with the following fields:
-- No: 1, 2, 3 incrementing
-- Category: NULL/TICK/LOOP/ARRAY/EVENT/CAST/REF/REPLICATE/INTERFACE/RESOURCE/INIT/ANIM/UI/COMPILE
-- Blueprint: Blueprint asset path (e.g., Content/Blueprints/Characters/BP_PlayerCharacter)
-- Graph/Function: Event graph or function name (e.g., EventGraph, Event BeginPlay, UpdateHealth)
-- NodeDescription: Problem node description (e.g., "Get Player Pawn then Cast to MyCharacter then Get Mesh")
-- Risk: Risk description (crash/leak/performance/network sync)
-- HowToTrigger: Trigger/reproduction conditions
-- SuggestedFix: Minimally invasive fix suggestion
-- Confidence: High/Medium/Low
+Whether the submitted content is a Blueprint node or a C++ source file, you MUST output a **JSON array** (exactly consistent with standard C++ detection; do not output a Markdown table). Each object in the array must include all of the following fields:
+- no: sequence number starting from 1
+- category: defect type. **Blueprint node defects** use NULL/TICK/LOOP/ARRAY/EVENT/CAST/REF/REPLICATE/INTERFACE/RESOURCE/INIT/ANIM/UI/COMPILE; **C++ source defects** use AUTO/ARRAY/MEMF/LEAK/OSRES/STL/DEPR/PERF/CLASS/COMPILE
+- file: relative path. **Blueprint node defects** use the Blueprint asset path (e.g., Content/Blueprints/Characters/BP_PlayerCharacter); **C++ source defects** use the code file relative path (e.g., Source/MyProject/MyActor.cpp)
+- function: function or symbol name. **Blueprint node defects** use the event graph or function name (e.g., Event BeginPlay, UpdateHealth); **C++ defects** use the function or symbol name
+- snippet: key code / node description, joined with \n. **C++ defects**: 1-3 lines of clean code, must NOT include any `L{n}:` line-number prefix (the code block already has real line numbers on every line; copy them into `lines`, do not bring the handwritten prefix into `snippet`); **Blueprint node defects**: describe the problematic nodes (e.g., "Get Player Pawn then Cast to MyCharacter then Get Mesh")
+- lines: line number or range. **C++ source defects**: must strictly correspond to the real line numbers in the file named in `file` (counted from 1 in that file's original text), e.g., "L120" or "L118-L125"; the code block already shows real line numbers on every line, **copy them directly** (do not estimate or recount); when a header and its implementation are merged for one detection, each defect's `lines` must be counted from that defect's own `file` in the original file. **Blueprint node defects**: nodes have no text line numbers, use "N/A"
+- risk: risk description (crash/leak/performance/network sync)
+- howToTrigger: trigger/reproduction condition
+- suggestedFix: minimally invasive fix suggestion
+- confidence: High/Medium/Low
+- **Line-number authenticity & uniqueness constraint (C++ source defects only)**: `lines` must be a "real and unique" candidate line number that actually exists in the code block; **never fabricate non-existent line numbers**; within the same code block, do not emit contradictory or duplicate line numbers. If the exact line number cannot be determined, you may add an optional field `xline` (a single candidate absolute line number that must really exist in the code block) as a fallback; if `function` is empty, you may add an optional field `xfunc` (the function/class containing the defect, preferring the outermost function/class). These optional fields are only used when the main `lines`/`function` are missing. This constraint does not apply to Blueprint node defects (`lines` = "N/A").
+- **Recommended single-pass size**: about **1500 lines** per pass for C++ source; overly large files are automatically split by the detection system into overlapping chunks. For Blueprint nodes, prefer a single Blueprint asset or a single graph per pass.
+- **Each distinct defect may be listed only once**: multiple call sites/branches hitting the same defect should each be a separate entry with its own real line number (C++) or node path (Blueprint); do not list the same defect repeatedly.
 
-Example:
-| No | Category | Blueprint | Graph/Function | NodeDescription | Risk | HowToTrigger | SuggestedFix | Confidence |
-|----|----------|-----------|----------------|-----------------|------|--------------|--------------|------------|
-| 1 | NULL | Content/Blueprints/Characters/BP_Player | Event BeginPlay | Get Pawn followed by direct call to Set Actor Location | Null reference crash | When Pawn not spawned | Add IsValid check after Get Pawn | High |
-| 2 | TICK | Content/Blueprints/AI/BP_Enemy | Event Tick | Get All Actors of Class called in Tick | Severe performance issue | Executed every frame causing lag | Change to Timer executing every 0.5 seconds | High |
-| 3 | LOOP | Content/Blueprints/Inventory/BP_Inventory | AddItem Function | For Each Loop calling Remove from Array | Iterator invalidation | Removing elements in loop causes crash | Change to For Loop reverse traversal | High |
+Example (C++ source defect):
+```json
+[
+  {"no":1,"category":"ARRAY","file":"Source/MyProject/MyActor.cpp","function":"AMyActor::Tick","snippet":"for(int i=0;i<Arr.Num();i++){ Arr[i].Process(); }","lines":"L120","risk":"Out-of-bounds risk","howToTrigger":"When Arr is empty","suggestedFix":"Null-check before loop","confidence":"High"}
+]
+```
+Example (Blueprint node defect):
+```json
+[
+  {"no":1,"category":"NULL","file":"Content/Blueprints/Characters/BP_Player","function":"Event BeginPlay","snippet":"Get Pawn followed by direct call to Set Actor Location","lines":"N/A","risk":"Null reference crash","howToTrigger":"Called when Pawn not spawned","suggestedFix":"Add IsValid check after Get Pawn","confidence":"High"}
+]
+```
 
 ### Format Requirements Supplement
 - **Prohibit reporting false positives**: Strictly filter according to the above "False Positive Filtering Rules"
 - **Prohibit duplicate reporting**: For multiple occurrences of the same issue, only list representative samples and note "multiple similar cases"
 - **Prohibit vague descriptions**: Each defect must have clear node path and trigger conditions
-- **CSV Format Requirements**:
-  - Risk / HowToTrigger / SuggestedFix fields in English
-  - NodeDescription field avoid using arrow symbols, use "followed by", "then" and other connecting words
-  - SuggestedFix field must be concise, single line description, not exceeding 50 characters
-  - Avoid using commas in fields, use semicolons or "and" to connect
-  - All field content must be single-line text, not containing line breaks
-  - Complex fix suggestions should be split into multiple independent defect records
+- **Unified JSON output**: All defects (Blueprint nodes and C++ source) are output as the JSON array defined in "Output Report Format" above, so they can be parsed and exported to xlsx uniformly, consistent with standard C++ detection.
+- All field values must be single-line JSON values; use \n to escape line breaks (do not output literal newlines).
+- **Avoid arrow symbols in `snippet`** (such as →, ➜, etc.); use connectors like "followed by", "then" instead for readability.
+- Avoid using English commas directly inside `snippet` (use "and" to connect if needed) to keep fields clear.
+- Complex fix suggestions should be split into multiple independent defect records
+- **Blueprint node-location authenticity constraint**: `file` (Blueprint asset path) / `function` (graph or function name) / `snippet` (node description) must strictly correspond to real asset paths, graphs, and nodes that actually exist in the submitted Blueprint; **never fabricate non-existent Blueprint paths, graph names, or node descriptions**. The same node path must not appear repeatedly in the same report.
+- **C++ source line-number authenticity**: When the submitted content includes C++ source, `lines` must be real and unique (follow the "Line-number authenticity & uniqueness constraint" above); never fabricate.
 
 ## Report Requirements (Key Principles to Reduce False Positives)
 

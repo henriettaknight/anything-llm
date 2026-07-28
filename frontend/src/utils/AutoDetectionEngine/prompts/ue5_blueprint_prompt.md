@@ -379,35 +379,45 @@
 - P2：架构问题或最佳实践（INTERFACE/UI/ANIM/CAST）
 
 ## 输出报告格式（请严格遵循）
-以Markdown表格输出，每条一行，字段如下：
-- No：1，2，3递增
-- Category: NULL/TICK/LOOP/ARRAY/EVENT/CAST/REF/REPLICATE/INTERFACE/RESOURCE/INIT/ANIM/UI/COMPILE
-- Blueprint: 蓝图资产路径（如 Content/Blueprints/Characters/BP_PlayerCharacter）
-- Graph/Function: 事件图表或函数名（如 EventGraph, Event BeginPlay, UpdateHealth）
-- NodeDescription: 问题节点描述（如 "Get Player Pawn → Cast to MyCharacter → Get Mesh"）
-- Risk: 风险说明（崩溃/泄漏/性能/网络同步）
-- HowToTrigger: 触发/重现条件
-- SuggestedFix: 最小化入侵修复建议
-- Confidence: High/Medium/Low
+无论送审内容是蓝图节点还是 C++ 源文件，都必须以 **JSON 数组** 输出（与标准 C++ 检测完全一致，不要输出 Markdown 表格）。数组内每个对象字段如下（全部必填）：
+- no: 从 1 开始递增的序号
+- category: 缺陷类型。**蓝图节点缺陷**用 NULL/TICK/LOOP/ARRAY/EVENT/CAST/REF/REPLICATE/INTERFACE/RESOURCE/INIT/ANIM/UI/COMPILE；**C++ 源文件缺陷**用 AUTO/ARRAY/MEMF/LEAK/OSRES/STL/DEPR/PERF/CLASS/COMPILE
+- file: 相对路径。**蓝图节点缺陷**填蓝图资产路径（如 Content/Blueprints/Characters/BP_PlayerCharacter）；**C++ 源文件缺陷**填代码文件相对路径（如 Source/MyProject/MyActor.cpp）
+- function: 函数或符号名。**蓝图节点缺陷**填事件图表或函数名（如 Event BeginPlay, UpdateHealth）；**C++ 缺陷**填函数或符号名
+- snippet: 关键代码/节点描述，使用 \n 连接多行。**C++ 缺陷**：1-3 行纯净代码，不得包含 `L{n}:` 行号前缀（代码块每行已标注真实行号，请直接照抄到 `lines`，不要把手写前缀带进 `snippet`）；**蓝图节点缺陷**：填写问题节点描述（如 "Get Player Pawn 后 Cast to MyCharacter 后 Get Mesh"）
+- lines: 行号或范围。**C++ 源文件缺陷**：必须严格对应 `file` 所填文件的真实行号（以该文件原始文本从 1 计数），如 "L120" 或 "L118-L125"，代码块每行已标注真实行号，**直接照抄**（不要自行估算或重新计数）；头文件与实现文件合并检测时，每个缺陷的 `lines` 必须以其自身 `file` 在原始文件中的真实位置计数。**蓝图节点缺陷**：节点无文本行号，填 "N/A"
+- risk: 风险说明（崩溃/泄漏/性能/网络同步）
+- howToTrigger: 触发/重现条件
+- suggestedFix: 最小化入侵修复建议
+- confidence: High/Medium/Low
+- **行号真实性与唯一约束（仅 C++ 源文件缺陷）**：`lines` 必须是代码块中"真实存在且唯一"的候选行号，**严禁编造不存在的行号**；同一代码块内不得出现相互矛盾的重复行号。若实在无法确定精确行号，可额外给出可选字段 `xline`（单个候选绝对行号，必须是代码块中真实存在的行号）作为回退；若 `function` 为空，可额外给出可选字段 `xfunc`（缺陷所在函数/类名，优先取所在最外层函数/类）。这些可选字段仅在主 `lines`/`function` 缺失时使用。蓝图节点缺陷此约束不适用（`lines` 填 "N/A"）。
+- **单次送审规模建议**：C++ 源文件推荐单次送审目标约 **1500 行**，超大文件由检测系统自动切分为带重叠的小块分别送审；蓝图节点推荐单次送审单个蓝图资产或单个图表。
+- **同一处缺陷只能列出一次**：多处调用点/多分支命中应各自独立成条并分别标注真实行号（C++）或节点路径（蓝图），禁止重复列出同一缺陷。
 
-示例：
-| No | Category | Blueprint | Graph/Function | NodeDescription | Risk | HowToTrigger | SuggestedFix | Confidence |
-|----|----------|-----------|----------------|-----------------|------|--------------|--------------|------------|
-| 1 | NULL | Content/Blueprints/Characters/BP_Player | Event BeginPlay | Get Pawn 后直接调用 Set Actor Location | 空引用崩溃 | Pawn 未生成时调用 | 在 Get Pawn 后添加 IsValid 检查 | High |
-| 2 | TICK | Content/Blueprints/AI/BP_Enemy | Event Tick | Get All Actors of Class 在 Tick 中调用 | 严重性能问题 | 每帧执行导致卡顿 | 改用 Timer 每 0.5 秒执行一次 | High |
-| 3 | LOOP | Content/Blueprints/Inventory/BP_Inventory | AddItem Function | For Each Loop 中调用 Remove from Array | 迭代器失效 | 循环中移除元素导致崩溃 | 改用 For Loop 倒序遍历 | High |
+示例（C++ 源文件缺陷）：
+```json
+[
+  {"no":1,"category":"ARRAY","file":"Source/MyProject/MyActor.cpp","function":"AMyActor::Tick","snippet":"for(int i=0;i<Arr.Num();i++){ Arr[i].Process(); }","lines":"L120","risk":"越界风险","howToTrigger":"Arr 为空时访问","suggestedFix":"循环前判空","confidence":"High"}
+]
+```
+示例（蓝图节点缺陷）：
+```json
+[
+  {"no":1,"category":"NULL","file":"Content/Blueprints/Characters/BP_Player","function":"Event BeginPlay","snippet":"Get Pawn 后直接调用 Set Actor Location","lines":"N/A","risk":"空引用崩溃","howToTrigger":"Pawn 未生成时调用","suggestedFix":"在 Get Pawn 后添加 IsValid 检查","confidence":"High"}
+]
+```
 
 ### 格式要求补充
 - **禁止报告虚假缺陷**：按照上述"虚假缺陷过滤规则"严格过滤
 - **禁止重复报告**：同一问题的多处出现，仅列示代表性样本并注明"同类多处"
 - **禁止模糊描述**：每个缺陷必须有明确的节点路径和触发条件
-- **CSV 格式要求**：
-  - Risk / HowToTrigger / SuggestedFix 字段使用中文回答
-  - NodeDescription 字段避免使用箭头符号，改用"后"、"然后"等连接词
-  - SuggestedFix 字段必须简洁，单行描述，不超过50字
-  - 避免在字段内使用逗号，改用分号或"和"字连接
-  - 所有字段内容必须是单行文本，不包含换行符
-  - 复杂的修复建议应拆分为多条独立的缺陷记录
+- **统一 JSON 输出**：所有缺陷（蓝图节点与 C++ 源文件）均输出为上方「输出报告格式」定义的 JSON 数组，便于统一解析与导出 xlsx，与标准 C++ 检测保持一致。
+- 所有字段内容应为单行 JSON 值；多行用 \n 转义（不要输出字面换行符）。
+- **snippet 避免使用箭头符号**（如 → 、➜ 等）；用 "后" 或 "然后" 等中文连接词代替，提升可读性。
+- snippet 中避免直接使用英文逗号（如需要可用"以及"连接），保持字段清晰。
+- 复杂的修复建议应拆分为多条独立的缺陷记录
+- **蓝图节点定位真实性约束**：`file`(蓝图资产路径)/`function`(图表或函数名)/`snippet`(节点描述) 必须严格对应送审蓝图中真实存在的资产、图表与节点；**严禁编造不存在的蓝图路径、图表名或节点描述**。同一节点路径不得在同一报告中重复出现。
+- **C++ 源文件行号真实性**：送审内容含 C++ 源码时，`lines` 必须真实存在且唯一（遵守上方「行号真实性与唯一约束」），不得编造。
 
 ## 报告要求（减少误报的关键原则）
 
