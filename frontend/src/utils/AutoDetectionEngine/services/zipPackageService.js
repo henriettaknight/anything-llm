@@ -18,17 +18,15 @@ class ZipPackageServiceImpl {
   /**
    * Package all reports and statistics into a ZIP file
    * @param {Object} options - Package options
-   * @param {Array<{groupName: string, xlsxBuffer: ArrayBuffer, defects: Array}>} options.defectReports - Defect reports
-   * @param {string} options.tokenStatistics - Token statistics CSV content
-   * @param {string} [options.htmlReport] - HTML summary report (optional)
-   * @param {string} [options.fileName] - Custom file name (without extension)
+ * @param {Array<{groupName: string, xlsxBuffer: ArrayBuffer, defects: Array}>} options.defectReports - Defect reports
+ * @param {string|ArrayBuffer} options.tokenStatistics - Token statistics (真 xlsx ArrayBuffer)
+ * @param {string} [options.fileName] - Custom file name (without extension)
    * @returns {Promise<void>}
    */
   async packageAndDownload(options) {
     const {
       defectReports = [],
       tokenStatistics = '',
-      htmlReport = null,
       fileName = null
     } = options;
 
@@ -36,7 +34,6 @@ class ZipPackageServiceImpl {
       console.log('📦 Starting ZIP packaging...');
       console.log('  - Defect reports:', defectReports.length);
       console.log('  - Has token statistics:', !!tokenStatistics);
-      console.log('  - Has HTML report:', !!htmlReport);
 
       const zip = new JSZip();
 
@@ -65,11 +62,7 @@ class ZipPackageServiceImpl {
         console.log('  ✓ Added: token_statistics.xlsx');
       }
 
-      // 3. Add HTML summary report to root (optional)
-      if (htmlReport) {
-        zip.file('summary.html', htmlReport);
-        console.log('  ✓ Added: summary.html');
-      }
+      // 3. HTML 报告已移除：报告统一以 xlsx 交付（缺陷明细 xlsx + token_statistics.xlsx）
 
       // 4. Generate ZIP file
       console.log('📦 Generating ZIP file...');

@@ -265,22 +265,30 @@ class DetectionOrchestratorImpl {
       // End token statistics session and get statistics
       const tokenStats = tokenStatisticsService.endSession();
       let tokenStatisticsXLSX = null;
-      
-      if (tokenStats && tokenStats.filesProcessed > 0) {
-        console.log('📊 Token statistics collected:', {
-          filesProcessed: tokenStats.filesProcessed,
-          totalTokens: tokenStats.totalTokens
-        });
-        
-        // Detect user language
+
+      // 诊断日志：无论是否有数据都打印 tokenStats 状态，便于定位"token_statistics.xlsx 没产出"
+      console.log('📊 [tokenStats] endSession 返回:', tokenStats ? {
+        sessionId: tokenStats.sessionId,
+        filesProcessed: tokenStats.filesProcessed,
+        fileRecordsLen: tokenStats.fileRecords ? tokenStats.fileRecords.length : 'no-fileRecords',
+        totalPromptTokens: tokenStats.totalPromptTokens,
+        totalCompletionTokens: tokenStats.totalCompletionTokens,
+        totalTokens: tokenStats.totalTokens
+      } : 'NULL(无活跃 session)');
+
+      if (tokenStats) {
+        // 始终生成 token_statistics.xlsx（即便 0 文件也输出仅汇总页），避免文件整包丢失
         const { detectUserLanguage } = await import('../utils/languageDetector.js');
         const userLang = detectUserLanguage();
         const locale = userLang === 'zh' ? 'zh' : 'en';
-        
-        // Generate token statistics xlsx with user's language
+
         tokenStatisticsXLSX = await tokenStatisticsService.generateXLSXBuffer(tokenStats, locale);
+        console.log('📊 [tokenStats] generateXLSXBuffer 结果:', tokenStatisticsXLSX ? `OK(${tokenStatisticsXLSX.byteLength}B)` : 'NULL');
+        if (!tokenStatisticsXLSX) {
+          console.warn('⚠️ generateXLSXBuffer 返回 null，token_statistics.xlsx 将缺失');
+        }
       } else {
-        console.warn('⚠️ No token statistics collected during this session');
+        console.warn('⚠️ No active token statistics session (endSession 返回 null) —— token_statistics.xlsx 将缺失');
       }
       
       // Collect all defect reports for ZIP packaging
@@ -339,12 +347,7 @@ class DetectionOrchestratorImpl {
         console.log(`  ✓ Collected report for: ${groupName}`);
       }
       
-      // Generate HTML summary report
-      console.log('📄 Generating HTML summary report...');
-      const htmlReport = zipPackageService.generateHTMLSummary({
-        defectReports: defectReports,
-        tokenStats: tokenStats
-      });
+      // HTML 报告已移除：报告统一以 xlsx 交付（缺陷明细 xlsx + token_statistics.xlsx）
       
       // Package everything into ZIP and download
       console.log('📦 Packaging all reports into ZIP...');
@@ -359,7 +362,6 @@ class DetectionOrchestratorImpl {
       await zipPackageService.packageAndDownload({
         defectReports: defectReports,
         tokenStatistics: tokenStatisticsXLSX,
-        htmlReport: htmlReport,
         fileName: `report_${timestamp}`
       });
       
@@ -398,12 +400,14 @@ class DetectionOrchestratorImpl {
           filesScanned: totalFilesScanned,
           defectsFound: allDefects.length,
           batches: allResults.flatMap(r => r.batches || []),
+          groups: allResults,  // 保留按分组的原始结构，供报告区下载复用（与自动下载路径一致）
           sessionId: this.currentSession.id,
-          timestamp: Date.now(),
-          createdAt: new Date().toISOString(),
+          timestamp: now.getTime(),
+          createdAt: now.toISOString(),
           status: 'completed',
           defects: allDefects,
-          results: allFileResults
+          results: allFileResults,
+          tokenStats: tokenStats
         };
         
         // 调用回调保存到 localStorage
@@ -463,20 +467,20 @@ class DetectionOrchestratorImpl {
       // End token statistics session (even on error)
       const tokenStats = tokenStatisticsService.endSession();
       let tokenStatisticsXLSX = null;
-      
-      if (tokenStats && tokenStats.filesProcessed > 0) {
-        console.log('📊 Token statistics collected (partial):', {
-          filesProcessed: tokenStats.filesProcessed,
-          totalTokens: tokenStats.totalTokens
-        });
-        
-        // Detect user language
+
+      console.log('📊 [tokenStats-partial] endSession 返回:', tokenStats ? {
+        filesProcessed: tokenStats.filesProcessed,
+        fileRecordsLen: tokenStats.fileRecords ? tokenStats.fileRecords.length : 'no-fileRecords'
+      } : 'NULL');
+
+      if (tokenStats) {
         const { detectUserLanguage } = await import('../utils/languageDetector.js');
         const userLang = detectUserLanguage();
         const locale = userLang === 'zh' ? 'zh' : 'en';
         
         // Generate token statistics xlsx with user's language
         tokenStatisticsXLSX = await tokenStatisticsService.generateXLSXBuffer(tokenStats, locale);
+        console.log('📊 [tokenStats-partial] generateXLSXBuffer:', tokenStatisticsXLSX ? `OK(${tokenStatisticsXLSX.byteLength}B)` : 'NULL');
         
         // Try to package partial results into ZIP
         try {
@@ -534,10 +538,7 @@ class DetectionOrchestratorImpl {
           }
           
           if (defectReports.length > 0 || tokenStatisticsXLSX) {
-            const htmlReport = zipPackageService.generateHTMLSummary({
-              defectReports: defectReports,
-              tokenStats: tokenStats
-            });
+            // HTML 报告已移除：报告统一以 xlsx 交付（缺陷明细 xlsx + token_statistics.xlsx）
             
             // Generate timestamp for partial report filename
             const now = new Date();
@@ -549,7 +550,6 @@ class DetectionOrchestratorImpl {
             await zipPackageService.packageAndDownload({
               defectReports: defectReports,
               tokenStatistics: tokenStatisticsXLSX,
-              htmlReport: htmlReport,
               fileName: `report_${timestamp}_partial`
             });
             

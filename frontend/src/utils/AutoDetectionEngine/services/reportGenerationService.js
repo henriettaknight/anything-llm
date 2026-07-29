@@ -456,7 +456,8 @@ class ReportGenerationServiceImpl {
 
     // Collect all valid defects
     let defectIndex = 1;
-    for (const fileResult of report.fileResults) {
+    const resolvedFileResults = this._resolveFileResults(report);
+    for (const fileResult of resolvedFileResults) {
       if (fileResult.hasDefects && fileResult.defects.length > 0) {
         const validDefects = fileResult.defects.filter(defect => 
           !this.isPlaceholderDefectInMarkdown(defect)
@@ -588,8 +589,8 @@ class ReportGenerationServiceImpl {
       },
       summary: report.summary,
       metadata: report.metadata,
-      defects: this.extractDefectsForExport(report.fileResults),
-      fileResults: report.fileResults.map(fr => ({
+      defects: this.extractDefectsForExport(this._resolveFileResults(report)),
+      fileResults: this._resolveFileResults(report).map(fr => ({
         file: fr.file,
         hasDefects: fr.hasDefects,
         defectCount: fr.defects.length,
@@ -764,6 +765,41 @@ class ReportGenerationServiceImpl {
   }
 
   /**
+   * 兼容报告：部分报告（如跨分组汇总报告 unifiedReport）仅包含 defects/results，
+   * 未包含 fileResults 数组，直接遍历会导致导出 xlsx 为空。这里优先使用 fileResults，
+   * 缺失时从扁平的 defects 按 file 重建，保证 xlsx 始终有数据。
+   * @private
+   */
+  _resolveFileResults(report) {
+    if (report?.fileResults && report.fileResults.length > 0) {
+      return report.fileResults;
+    }
+    return this._buildFileResultsFromDefects(report?.defects);
+  }
+
+  /**
+   * 从扁平 defects 列表按 file 重建 fileResults 结构
+   * @private
+   */
+  _buildFileResultsFromDefects(defects) {
+    if (!defects || !Array.isArray(defects) || defects.length === 0) return [];
+    const grouped = new Map();
+    for (const d of defects) {
+      const fp = d.file || d.filePath || 'unknown';
+      if (!grouped.has(fp)) {
+        grouped.set(fp, {
+          file: { path: fp, name: fp === 'unknown' ? 'unknown' : fp.split('/').pop() },
+          filePath: fp,
+          defects: [],
+          hasDefects: false
+        });
+      }
+      grouped.get(fp).defects.push(d);
+    }
+    return Array.from(grouped.values()).map(g => ({ ...g, hasDefects: g.defects.length > 0 }));
+  }
+
+  /**
    * Generate an xlsx Blob directly from report data using SheetJS.
    * Returns { blob, fileName }.
    * @param {DetectionReport} report
@@ -779,7 +815,8 @@ class ReportGenerationServiceImpl {
     const rows = [headers];
     let defectIndex = 1;
 
-    for (const fileResult of report.fileResults) {
+    const fileResults = this._resolveFileResults(report);
+    for (const fileResult of fileResults) {
       if (!fileResult?.defects?.length) continue;
 
       const validDefects = fileResult.defects.filter(
@@ -883,8 +920,9 @@ class ReportGenerationServiceImpl {
     // snippet/code fields are optional (AI may omit them).
     // Only require that `type` (category) is a non-empty, non-placeholder string.
     
-    const typeValue = defect.type;
-    
+    // JSON 缺陷使用 category 字段；Markdown 表格缺陷使用 type 字段。二者皆可。
+    const typeValue = defect.category || defect.type;
+
     // If type is missing or is a pure placeholder dash sequence, treat as placeholder
     return !typeValue ||
       placeholders.includes(typeValue) ||
@@ -928,48 +966,74 @@ class ReportGenerationServiceImpl {
       // Import zipPackageService
       const { default: zipPackageService } = await import('./zipPackageService.js');
       
-      // Prepare defect reports - use xlsx directly to avoid all CSV parsing issues
-      const gName = groupName || report.groupName || 'root';
-      const { blob: xlsxBlob } = this.generateXLSXReport(report, gName);
-      const xlsxBuffer = await xlsxBlob.arrayBuffer();
+      // 与自动下载路径(detectionOrchestrator)保持一致：按分组生成多个缺陷明细 xlsx
+      const groups = (report.groups && report.groups.length)
+        ? report.groups
+        : [{ groupName: groupName || report.groupName || 'root', groupPath: report.groupPath || '.', batches: report.batches || [] }];
 
-      // Collect flat defects list for HTML statistics (no CSV parsing needed)
-      const allDefects = [];
-      for (const fr of (report.fileResults || [])) {
-        if (fr.hasDefects && fr.defects?.length) {
-          for (const d of fr.defects) {
-            if (!this.isPlaceholderDefectInMarkdown(d)) {
-              allDefects.push({ ...d, _filePath: fr.file?.path || '' });
+      const defectReports = [];
+      for (const grp of groups) {
+        const gName = grp.groupName || 'root';
+        const batchResults = (grp.batches || []).flatMap(batch => batch.results || []);
+        const groupReport = {
+          groupName: gName,
+          groupPath: grp.groupPath || '.',
+          filesScanned: batchResults.length,
+          defectsFound: batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0),
+          defects: batchResults.flatMap(r => r.defects || []),
+          fileResults: batchResults.map(r => ({
+            file: { path: r.filePath || r.file?.path },
+            filePath: r.filePath || r.file?.path,
+            defects: r.defects || [],
+            hasDefects: (r.defects?.length || 0) > 0
+          })),
+          totalFiles: batchResults.length,
+          totalDefects: batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0),
+          summary: { bySeverity: {}, byType: {} }
+        };
+
+        const detectionReport = this.convertCodeDetectionReport(groupReport);
+        const { blob: xlsxBlob } = this.generateXLSXReport(detectionReport, gName);
+        const xlsxBuffer = await xlsxBlob.arrayBuffer();
+
+        const allDefects = [];
+        for (const fr of (detectionReport.fileResults || [])) {
+          if (fr.hasDefects && fr.defects?.length) {
+            for (const d of fr.defects) {
+              if (!this.isPlaceholderDefectInMarkdown(d)) {
+                allDefects.push({ ...d, _filePath: fr.file?.path || '' });
+              }
             }
           }
         }
+
+        defectReports.push({
+          groupName: gName,
+          xlsxBuffer,           // xlsx binary for ZIP packaging
+          defects: allDefects,  // flat list for statistics
+          filesScanned: groupReport.filesScanned,
+          defectsFound: groupReport.defectsFound
+        });
       }
 
-      const defectReports = [{
-        groupName: gName,
-        xlsxBuffer,           // xlsx binary for ZIP packaging
-        defects: allDefects,  // flat list for statistics
-        filesScanned: report.totalFiles || 0,
-        defectsFound: report.totalDefects || 0
-      }];
-      
-      console.log(`📦 [reportGenerationService.downloadReport] 准备缺陷报告完成`);
-      
-      // Prepare token statistics (if available)
+      console.log(`📦 [reportGenerationService.downloadReport] 准备缺陷报告完成（${defectReports.length} 个分组）`);
+
+      // Prepare token statistics xlsx (真正的 xlsx，不再用 CSV 伪文件)
       let tokenStatistics = null;
-      if (report.metadata?.tokenStats) {
-        tokenStatistics = this.generateTokenStatisticsCSV(report.metadata.tokenStats);
-        console.log(`📦 [reportGenerationService.downloadReport] 包含 token 统计`);
+      const tokenStatsSrc = report.tokenStats || report.metadata?.tokenStats;
+      console.log('📊 [tokenStats-pathB] report.tokenStats?', !!report.tokenStats, 'report.metadata?.tokenStats?', !!report.metadata?.tokenStats, '=> tokenStatsSrc:', !!tokenStatsSrc);
+      if (tokenStatsSrc) {
+        const { default: tokenStatisticsService } = await import('./tokenStatisticsService.js');
+        // 跟随浏览器语言，与自动下载路径一致
+        const { detectUserLanguage } = await import('../utils/languageDetector.js');
+        const locale = detectUserLanguage() === 'zh' ? 'zh' : 'en';
+        tokenStatistics = await tokenStatisticsService.generateXLSXBuffer(tokenStatsSrc, locale);
+        console.log(`📊 [tokenStats-pathB] generateXLSXBuffer:`, tokenStatistics ? `OK(${tokenStatistics.byteLength}B)` : 'NULL', '包含 token 统计 xlsx');
+      } else {
+        console.warn('⚠️ [tokenStats-pathB] 报告中未找到 tokenStats（report.tokenStats 与 report.metadata.tokenStats 均缺失），token_statistics.xlsx 将不产出');
       }
       
-      // Generate HTML report
-      const htmlReport = zipPackageService.generateHTMLSummary({
-        defectReports,
-        tokenStats: report.metadata?.tokenStats,
-        sessionId: report.sessionId
-      });
-      
-      console.log(`📦 [reportGenerationService.downloadReport] HTML 报告生成完成`);
+      // HTML 报告已移除：报告统一以 xlsx 交付（缺陷明细 xlsx + token_statistics.xlsx）
       
       // Generate file name using report's original timestamp
       const reportTimestamp = new Date(report.timestamp || report.createdAt || Date.now()).toISOString()
@@ -984,7 +1048,6 @@ class ReportGenerationServiceImpl {
       await zipPackageService.packageAndDownload({
         defectReports,
         tokenStatistics,
-        htmlReport,
         fileName
       });
       

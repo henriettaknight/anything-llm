@@ -16,6 +16,7 @@ import {
   isPromptAckOrMetaResponse,
 } from './codeDetectionService.js';
 import { buildChunkSystemPrompt, buildChunkUserMessage } from '../context/chunkContextBuilder.js';
+import tokenStatisticsService from './tokenStatisticsService.js';
 
 /** 单文件进入分块送审的规模阈值（行/token） */
 export const SINGLE_FILE_CHUNK_THRESHOLD = 700;
@@ -130,7 +131,9 @@ async function chatWithTimeout(adapter, messageHistory) {
   const timeoutId = setTimeout(() => abortController.abort(), CHAT_TIMEOUT);
   try {
     const result = await adapter.adapter.chat(messageHistory, { signal: abortController.signal });
-    return result?.content || result?.fullText || '';
+    const content = result?.content || result?.fullText || '';
+    const usage = result?.usage || null;
+    return { content, usage };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -163,10 +166,11 @@ async function detectSingleChunk({ fileInfo, slice, startLine, endLine, systemPr
   ];
 
   const responseContent = await chatWithTimeout(adapter, messageHistory);
-  let defects = parseDefectDetectionResults(responseContent, fileInfo.path);
+  let defects = parseDefectDetectionResults(responseContent.content, fileInfo.path);
+  let chunkUsage = responseContent.usage;
 
   // 重试（与整文件逻辑一致）：疑似确认/寒暄文本时强约束重试一次
-  if (defects.length === 0 && isPromptAckOrMetaResponse(responseContent)) {
+  if (defects.length === 0 && isPromptAckOrMetaResponse(responseContent.content)) {
     const retryHistory = [
       ...messageHistory,
       {
@@ -176,12 +180,14 @@ async function detectSingleChunk({ fileInfo, slice, startLine, endLine, systemPr
     ];
     try {
       const retryResp = await chatWithTimeout(adapter, retryHistory);
-      if (retryResp) defects = parseDefectDetectionResults(retryResp, fileInfo.path);
+      if (retryResp.content) defects = parseDefectDetectionResults(retryResp.content, fileInfo.path);
+      if (retryResp.usage) chunkUsage = retryResp.usage;
     } catch (_e) {
       // 忽略重试错误，沿用空结果
     }
   }
-  return defects;
+  const promptText = systemPrompt + userMessage;
+  return { defects, promptText, responseText: responseContent.content, usage: chunkUsage };
 }
 
 /**
@@ -221,6 +227,7 @@ function locateChunkDefects(defects, fileContent, chunk, fileInfo) {
  */
 export async function detectLargeFileDefects({ fileInfo, fileContent, projectType }) {
   const serverLog = getServerLog();
+  const detectionStartTime = Date.now();
   const totalLines = (fileContent || '').split('\n').length;
   const coverage = {
     mode: 'chunk',
@@ -241,11 +248,14 @@ export async function detectLargeFileDefects({ fileInfo, fileContent, projectTyp
     serverLog?.info(`[大文件闸门] ${fileInfo.name} 切分为 ${chunks.length} 块（阈值 ${SINGLE_FILE_CHUNK_THRESHOLD}，重叠 ${CHUNK_OVERLAP}）`);
 
     const allDefects = [];
+    let aggregatedPrompt = '';
+    let aggregatedResponse = '';
+    const chunkUsages = [];
     for (let i = 0; i < chunks.length; i++) {
       const ch = chunks[i];
       serverLog?.info(`[大文件闸门] 处理块 ${i + 1}/${chunks.length}：行 ${ch.startLine}-${ch.endLine}`);
       try {
-        const chunkDefects = await detectSingleChunk({
+        const chunkResult = await detectSingleChunk({
           fileInfo,
           slice: ch.content,
           startLine: ch.startLine,
@@ -253,8 +263,11 @@ export async function detectLargeFileDefects({ fileInfo, fileContent, projectTyp
           systemPrompt,
           fileContent,
         });
-        const located = locateChunkDefects(chunkDefects, fileContent, ch, fileInfo);
+        const located = locateChunkDefects(chunkResult.defects, fileContent, ch, fileInfo);
         allDefects.push(...located);
+        aggregatedPrompt += chunkResult.promptText || '';
+        aggregatedResponse += chunkResult.responseText || '';
+        if (chunkResult.usage) chunkUsages.push(chunkResult.usage);
         coverage.successChunks++;
         coverage.coveredLines += (ch.endLine - ch.startLine + 1);
         coverage.chunks.push({ startLine: ch.startLine, endLine: ch.endLine, covered: true, defects: located.length });
@@ -272,6 +285,35 @@ export async function detectLargeFileDefects({ fileInfo, fileContent, projectTyp
     const merged = deduplicateDefects(allDefects);
     if (merged.length < allDefects.length) {
       serverLog?.info(`[大文件闸门] ${fileInfo.name} 跨块去重移除 ${allDefects.length - merged.length} 个重复缺陷`);
+    }
+
+    // 🔧 记录 token 统计（大文件分块路径此前漏记，导致 token_statistics.xlsx 全 0）
+    try {
+      const lineStats = { totalLines, codeLines: 0, commentLines: 0 };
+      // 仅当所有成功块都有 usage 时才用真实数据，否则传 null 走估算（与内联路径一致）
+      const allHaveUsage = chunkUsages.length > 0 &&
+        chunkUsages.length === coverage.successChunks &&
+        chunkUsages.every(u => u && typeof u.total_tokens === 'number');
+      const aggregatedUsage = allHaveUsage ? {
+        prompt_tokens: chunkUsages.reduce((s, u) => s + (u.prompt_tokens || 0), 0),
+        completion_tokens: chunkUsages.reduce((s, u) => s + (u.completion_tokens || 0), 0),
+        total_tokens: chunkUsages.reduce((s, u) => s + (u.total_tokens || 0), 0),
+      } : null;
+      const pathParts = (fileInfo.path || '').split('/').filter(p => p && p !== '.');
+      const moduleName = pathParts.length <= 1 ? 'root' : pathParts[0];
+      tokenStatisticsService.recordFileTokens(
+        fileInfo.name,
+        fileInfo.path,
+        aggregatedUsage,
+        aggregatedPrompt,
+        aggregatedResponse,
+        moduleName,
+        Date.now() - detectionStartTime,
+        lineStats
+      );
+      serverLog?.info(`[大文件闸门] ${fileInfo.name} 已记录 token 统计（${chunks.length} 块聚合，${allHaveUsage ? '真实usage' : '估算'}）`);
+    } catch (tokenErr) {
+      serverLog?.error(`[大文件闸门] ${fileInfo.name} 记录 token 统计失败:`, tokenErr);
     }
 
     return { defects: merged, coverage, manifest: coverage.chunks, mode: 'chunk' };

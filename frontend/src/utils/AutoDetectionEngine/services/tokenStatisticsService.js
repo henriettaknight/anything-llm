@@ -33,6 +33,19 @@
  * @property {Object} summary - Summary statistics
  */
 
+// 2026 公开 API 计费标准（美元 / 每百万 token），仅用于本地 gemma4 模型的费用估算参考
+const API_PRICING = {
+  deepseek: { label: 'DeepSeek (V3/R1)', inputPerM: 0.27, outputPerM: 1.10 },
+  claude:   { label: 'Claude Sonnet 4.6', inputPerM: 3, outputPerM: 15 }
+};
+
+// 按单价（每百万 token）估算输入/输出费用
+function estimateCost(pricing, sessionStats) {
+  const prompt = (sessionStats.totalPromptTokens / 1e6) * pricing.inputPerM;
+  const completion = (sessionStats.totalCompletionTokens / 1e6) * pricing.outputPerM;
+  return { prompt, completion };
+}
+
 class TokenStatisticsService {
   constructor() {
     this.currentSession = null;
@@ -338,29 +351,19 @@ class TokenStatisticsService {
    * Generate token statistics report
    * @param {SessionTokenStatistics} sessionStats - Session statistics
    * @param {string} [locale='zh'] - Report language ('zh' or 'en')
-   * @param {Object} [pricing] - Pricing information
-   * @param {number} [pricing.promptTokenPrice] - Price per 1K prompt tokens (USD)
-   * @param {number} [pricing.completionTokenPrice] - Price per 1K completion tokens (USD)
    * @returns {string} - CSV format report
    */
-  generateReport(sessionStats, locale = 'zh', pricing = null) {
+  generateReport(sessionStats, locale = 'zh') {
     if (!sessionStats || !sessionStats.fileRecords || sessionStats.fileRecords.length === 0) {
       console.warn('⚠️ No token statistics data to generate report');
       return '';
     }
 
-    // Default pricing (OpenAI GPT-4 pricing as reference)
-    const defaultPricing = {
-      promptTokenPrice: 0.03,      // $0.03 per 1K prompt tokens
-      completionTokenPrice: 0.06   // $0.06 per 1K completion tokens
-    };
-    
-    const actualPricing = pricing || defaultPricing;
-    
-    // Calculate costs
-    const promptCost = (sessionStats.totalPromptTokens / 1000) * actualPricing.promptTokenPrice;
-    const completionCost = (sessionStats.totalCompletionTokens / 1000) * actualPricing.completionTokenPrice;
-    const totalCost = promptCost + completionCost;
+    // 费用估算：按 2026 公开 API 价估算（本地 gemma4 模型无真实 API 费用）
+    const ds = estimateCost(API_PRICING.deepseek, sessionStats);
+    const cl = estimateCost(API_PRICING.claude, sessionStats);
+    const dsTotal = ds.prompt + ds.completion;
+    const clTotal = cl.prompt + cl.completion;
 
     // CSV header (localized)
     const headers = locale === 'zh' 
@@ -390,7 +393,7 @@ class TokenStatisticsService {
         `会话 ID,${sessionStats.sessionId}\n` +
         `开始时间,${new Date(sessionStats.startTime).toISOString()}\n` +
         `结束时间,${new Date(sessionStats.endTime).toISOString()}\n` +
-        `持续时间 (毫秒),${sessionStats.endTime - sessionStats.startTime}\n` +
+        `持续时间 (分钟),${((sessionStats.endTime - sessionStats.startTime) / 60000).toFixed(2)}\n` +
         `处理文件数,${sessionStats.filesProcessed}\n` +
         `实际数据文件数,${actualCount}\n` +
         `估算数据文件数,${estimatedCount}\n` +
@@ -400,20 +403,24 @@ class TokenStatisticsService {
         `平均 Prompt Tokens/文件,${sessionStats.summary.avgPromptTokensPerFile.toLocaleString()}\n` +
         `平均 Completion Tokens/文件,${sessionStats.summary.avgCompletionTokensPerFile.toLocaleString()}\n` +
         `平均总 Tokens/文件,${sessionStats.summary.avgTotalTokensPerFile.toLocaleString()}\n` +
-        `\n费用估算 (基于 GPT-4 定价)\n` +
-        `Prompt Token 单价,$${actualPricing.promptTokenPrice}/1K tokens\n` +
-        `Completion Token 单价,$${actualPricing.completionTokenPrice}/1K tokens\n` +
-        `Prompt 费用,$${promptCost.toFixed(4)}\n` +
-        `Completion 费用,$${completionCost.toFixed(4)}\n` +
-        `总费用,$${totalCost.toFixed(4)}\n` +
-        `总费用 (人民币),¥${(totalCost * 7.2).toFixed(2)} (按汇率 1:7.2 计算)\n` +
+        `\n费用估算（按 2026 公开 API 价，本地 gemma4 无真实费用）\n` +
+        `DeepSeek (输入 $${API_PRICING.deepseek.inputPerM}/1M, 输出 $${API_PRICING.deepseek.outputPerM}/1M),\n` +
+        `  Prompt 费用,$${ds.prompt.toFixed(4)}\n` +
+        `  Completion 费用,$${ds.completion.toFixed(4)}\n` +
+        `  总费用,$${dsTotal.toFixed(4)}\n` +
+        `  总费用 (人民币),¥${(dsTotal * 7.2).toFixed(2)} (按汇率 1:7.2)\n` +
+        `Claude Sonnet 4.6 (输入 $${API_PRICING.claude.inputPerM}/1M, 输出 $${API_PRICING.claude.outputPerM}/1M),\n` +
+        `  Prompt 费用,$${cl.prompt.toFixed(4)}\n` +
+        `  Completion 费用,$${cl.completion.toFixed(4)}\n` +
+        `  总费用,$${clTotal.toFixed(4)}\n` +
+        `  总费用 (人民币),¥${(clTotal * 7.2).toFixed(2)} (按汇率 1:7.2)\n` +
         `\n注意: 标记为"估算"的 Token 数量是基于文本长度的近似值（API 未提供使用数据）\n`;
     } else {
       summary = `\n\nSummary\n` +
         `Session ID,${sessionStats.sessionId}\n` +
         `Start Time,${new Date(sessionStats.startTime).toISOString()}\n` +
         `End Time,${new Date(sessionStats.endTime).toISOString()}\n` +
-        `Duration (ms),${sessionStats.endTime - sessionStats.startTime}\n` +
+        `Duration (min),${((sessionStats.endTime - sessionStats.startTime) / 60000).toFixed(2)}\n` +
         `Files Processed,${sessionStats.filesProcessed}\n` +
         `Files with Actual Token Data,${actualCount}\n` +
         `Files with Estimated Token Data,${estimatedCount}\n` +
@@ -423,13 +430,17 @@ class TokenStatisticsService {
         `Avg Prompt Tokens/File,${sessionStats.summary.avgPromptTokensPerFile.toLocaleString()}\n` +
         `Avg Completion Tokens/File,${sessionStats.summary.avgCompletionTokensPerFile.toLocaleString()}\n` +
         `Avg Total Tokens/File,${sessionStats.summary.avgTotalTokensPerFile.toLocaleString()}\n` +
-        `\nCost Estimation (Based on GPT-4 Pricing)\n` +
-        `Prompt Token Price,$${actualPricing.promptTokenPrice}/1K tokens\n` +
-        `Completion Token Price,$${actualPricing.completionTokenPrice}/1K tokens\n` +
-        `Prompt Cost,$${promptCost.toFixed(4)}\n` +
-        `Completion Cost,$${completionCost.toFixed(4)}\n` +
-        `Total Cost,$${totalCost.toFixed(4)}\n` +
-        `Total Cost (CNY),¥${(totalCost * 7.2).toFixed(2)} (Exchange rate 1:7.2)\n` +
+        `\nCost Estimation (2026 public API prices; local gemma4 has no real cost)\n` +
+        `DeepSeek (input $${API_PRICING.deepseek.inputPerM}/1M, output $${API_PRICING.deepseek.outputPerM}/1M),\n` +
+        `  Prompt Cost,$${ds.prompt.toFixed(4)}\n` +
+        `  Completion Cost,$${ds.completion.toFixed(4)}\n` +
+        `  Total Cost,$${dsTotal.toFixed(4)}\n` +
+        `  Total Cost (CNY),¥${(dsTotal * 7.2).toFixed(2)} (1:7.2)\n` +
+        `Claude Sonnet 4.6 (input $${API_PRICING.claude.inputPerM}/1M, output $${API_PRICING.claude.outputPerM}/1M),\n` +
+        `  Prompt Cost,$${cl.prompt.toFixed(4)}\n` +
+        `  Completion Cost,$${cl.completion.toFixed(4)}\n` +
+        `  Total Cost,$${clTotal.toFixed(4)}\n` +
+        `  Total Cost (CNY),¥${(clTotal * 7.2).toFixed(2)} (1:7.2)\n` +
         `\nNote: Token counts marked as "Estimated" are approximations based on text length (API did not provide usage data)\n`;
     }
 
@@ -448,26 +459,35 @@ class TokenStatisticsService {
   /**
    * Generate token statistics as an xlsx ArrayBuffer using SheetJS.
    * @param {Object} sessionStats
-   * @param {string} [locale]
-   * @param {Object} [pricing]
+   * @param {string} [locale='zh']
    * @returns {ArrayBuffer|null}
    */
-  async generateXLSXBuffer(sessionStats, locale = 'zh', pricing = null) {
-    if (!sessionStats || !sessionStats.fileRecords || sessionStats.fileRecords.length === 0) {
+  async generateXLSXBuffer(sessionStats, locale = 'zh') {
+    if (!sessionStats) {
       console.warn('⚠️ No token statistics data to generate xlsx');
       return null;
     }
 
     const XLSX = await import('xlsx');
 
-    const defaultPricing = { promptTokenPrice: 0.03, completionTokenPrice: 0.06 };
-    const actualPricing = pricing || defaultPricing;
-
-    const promptCost = (sessionStats.totalPromptTokens / 1000) * actualPricing.promptTokenPrice;
-    const completionCost = (sessionStats.totalCompletionTokens / 1000) * actualPricing.completionTokenPrice;
-    const totalCost = promptCost + completionCost;
+    // 费用估算：按 2026 公开 API 价估算（本地 gemma4 模型无真实 API 费用）
+    const ds = estimateCost(API_PRICING.deepseek, sessionStats);
+    const cl = estimateCost(API_PRICING.claude, sessionStats);
+    const dsTotal = ds.prompt + ds.completion;
+    const clTotal = cl.prompt + cl.completion;
 
     const isZh = locale === 'zh';
+
+    // 安全处理旧报告（可能缺少 startTime/endTime/summary 等字段）
+    const safeISO = (ts) => {
+      const d = new Date(ts);
+      return isNaN(d.getTime()) ? '' : d.toISOString();
+    };
+    const s = sessionStats.summary || {};
+    const safeAvg = (v) => (typeof v === 'number' ? v : 0);
+    const durMin = (sessionStats.startTime && sessionStats.endTime)
+      ? Number(((sessionStats.endTime - sessionStats.startTime) / 60000).toFixed(2))
+      : 'N/A';
 
     // --- Sheet 1: per-file records ---
     const fileHeaders = isZh
@@ -475,20 +495,23 @@ class TokenStatisticsService {
       : ['File Name', 'File Path', 'Total Lines', 'Code Lines', 'Comment Lines', 'Prompt Tokens', 'Completion Tokens', 'Total Tokens', 'Time(s)', 'Estimated', 'Timestamp'];
 
     const fileRows = [fileHeaders];
-    for (const r of sessionStats.fileRecords) {
-      fileRows.push([
-        r.fileName,
-        r.filePath,
-        r.totalLines || 0,
-        r.codeLines || 0,
-        r.commentLines || 0,
-        r.promptTokens,
-        r.completionTokens,
-        r.totalTokens,
-        r.processingTime ? +(r.processingTime / 1000).toFixed(1) : 0,
-        r.estimated ? (isZh ? '是' : 'Yes') : (isZh ? '否' : 'No'),
-        new Date(r.timestamp).toISOString()
-      ]);
+    const hasFileRecords = Array.isArray(sessionStats.fileRecords) && sessionStats.fileRecords.length > 0;
+    if (hasFileRecords) {
+      for (const r of sessionStats.fileRecords) {
+        fileRows.push([
+          r.fileName,
+          r.filePath,
+          r.totalLines || 0,
+          r.codeLines || 0,
+          r.commentLines || 0,
+          r.promptTokens,
+          r.completionTokens,
+          r.totalTokens,
+          r.processingTime ? +(r.processingTime / 1000).toFixed(1) : 0,
+          r.estimated ? (isZh ? '是' : 'Yes') : (isZh ? '否' : 'No'),
+          new Date(r.timestamp).toISOString()
+        ]);
+      }
     }
 
     const wsFiles = XLSX.utils.aoa_to_sheet(fileRows);
@@ -498,59 +521,69 @@ class TokenStatisticsService {
     ];
 
     // --- Sheet 2: summary ---
-    const estimatedCount = sessionStats.fileRecords.filter(r => r.estimated).length;
-    const actualCount = sessionStats.fileRecords.length - estimatedCount;
+    const estimatedCount = hasFileRecords ? sessionStats.fileRecords.filter(r => r.estimated).length : (sessionStats.estimatedCount || 0);
+    const actualCount = hasFileRecords ? sessionStats.fileRecords.length - estimatedCount : (sessionStats.actualCount || 0);
 
     const summaryRows = isZh ? [
-      ['会话 ID', sessionStats.sessionId],
-      ['开始时间', new Date(sessionStats.startTime).toISOString()],
-      ['结束时间', new Date(sessionStats.endTime).toISOString()],
-      ['持续时间 (毫秒)', sessionStats.endTime - sessionStats.startTime],
+      ['会话 ID', sessionStats.sessionId || ''],
+      ['开始时间', safeISO(sessionStats.startTime)],
+      ['结束时间', safeISO(sessionStats.endTime)],
+      ['持续时间 (分钟)', durMin],
       ['处理文件数', sessionStats.filesProcessed],
       ['实际数据文件数', actualCount],
       ['估算数据文件数', estimatedCount],
       ['总 Prompt Tokens', sessionStats.totalPromptTokens],
       ['总 Completion Tokens', sessionStats.totalCompletionTokens],
       ['总 Tokens', sessionStats.totalTokens],
-      ['平均 Prompt Tokens/文件', sessionStats.summary.avgPromptTokensPerFile],
-      ['平均 Completion Tokens/文件', sessionStats.summary.avgCompletionTokensPerFile],
-      ['平均总 Tokens/文件', sessionStats.summary.avgTotalTokensPerFile],
+      ['平均 Prompt Tokens/文件', safeAvg(s.avgPromptTokensPerFile)],
+      ['平均 Completion Tokens/文件', safeAvg(s.avgCompletionTokensPerFile)],
+      ['平均总 Tokens/文件', safeAvg(s.avgTotalTokensPerFile)],
       [],
-      ['Prompt Token 单价', `$${actualPricing.promptTokenPrice}/1K tokens`],
-      ['Completion Token 单价', `$${actualPricing.completionTokenPrice}/1K tokens`],
-      ['Prompt 费用', `$${promptCost.toFixed(4)}`],
-      ['Completion 费用', `$${completionCost.toFixed(4)}`],
-      ['总费用', `$${totalCost.toFixed(4)}`],
-      ['总费用 (人民币)', `¥${(totalCost * 7.2).toFixed(2)}`],
+      ['费用估算说明', '按 2026 公开 API 价估算（实际为本地 gemma4 模型，无真实 API 费用）'],
+      [`DeepSeek：输入 $${API_PRICING.deepseek.inputPerM}/1M，输出 $${API_PRICING.deepseek.outputPerM}/1M`, ''],
+      ['  Prompt 费用', `$${ds.prompt.toFixed(4)}`],
+      ['  Completion 费用', `$${ds.completion.toFixed(4)}`],
+      ['  总费用', `$${dsTotal.toFixed(4)}`],
+      ['  总费用 (人民币)', `¥${(dsTotal * 7.2).toFixed(2)}`],
+      [`Claude Sonnet 4.6：输入 $${API_PRICING.claude.inputPerM}/1M，输出 $${API_PRICING.claude.outputPerM}/1M`, ''],
+      ['  Prompt 费用', `$${cl.prompt.toFixed(4)}`],
+      ['  Completion 费用', `$${cl.completion.toFixed(4)}`],
+      ['  总费用', `$${clTotal.toFixed(4)}`],
+      ['  总费用 (人民币)', `¥${(clTotal * 7.2).toFixed(2)}`],
     ] : [
-      ['Session ID', sessionStats.sessionId],
-      ['Start Time', new Date(sessionStats.startTime).toISOString()],
-      ['End Time', new Date(sessionStats.endTime).toISOString()],
-      ['Duration (ms)', sessionStats.endTime - sessionStats.startTime],
+      ['Session ID', sessionStats.sessionId || ''],
+      ['Start Time', safeISO(sessionStats.startTime)],
+      ['End Time', safeISO(sessionStats.endTime)],
+      ['Duration (min)', durMin],
       ['Files Processed', sessionStats.filesProcessed],
       ['Files with Actual Token Data', actualCount],
       ['Files with Estimated Token Data', estimatedCount],
       ['Total Prompt Tokens', sessionStats.totalPromptTokens],
       ['Total Completion Tokens', sessionStats.totalCompletionTokens],
       ['Total Tokens', sessionStats.totalTokens],
-      ['Avg Prompt Tokens/File', sessionStats.summary.avgPromptTokensPerFile],
-      ['Avg Completion Tokens/File', sessionStats.summary.avgCompletionTokensPerFile],
-      ['Avg Total Tokens/File', sessionStats.summary.avgTotalTokensPerFile],
+      ['Avg Prompt Tokens/File', safeAvg(s.avgPromptTokensPerFile)],
+      ['Avg Completion Tokens/File', safeAvg(s.avgCompletionTokensPerFile)],
+      ['Avg Total Tokens/File', safeAvg(s.avgTotalTokensPerFile)],
       [],
-      ['Prompt Token Price', `$${actualPricing.promptTokenPrice}/1K tokens`],
-      ['Completion Token Price', `$${actualPricing.completionTokenPrice}/1K tokens`],
-      ['Prompt Cost', `$${promptCost.toFixed(4)}`],
-      ['Completion Cost', `$${completionCost.toFixed(4)}`],
-      ['Total Cost', `$${totalCost.toFixed(4)}`],
-      ['Total Cost (CNY)', `¥${(totalCost * 7.2).toFixed(2)}`],
+      ['Cost Estimation Note', 'Estimated using 2026 public API prices (actual local gemma4 model has no real API cost)'],
+      [`DeepSeek: input $${API_PRICING.deepseek.inputPerM}/1M, output $${API_PRICING.deepseek.outputPerM}/1M`, ''],
+      ['  Prompt Cost', `$${ds.prompt.toFixed(4)}`],
+      ['  Completion Cost', `$${ds.completion.toFixed(4)}`],
+      ['  Total Cost', `$${dsTotal.toFixed(4)}`],
+      ['  Total Cost (CNY)', `¥${(dsTotal * 7.2).toFixed(2)}`],
+      [`Claude Sonnet 4.6: input $${API_PRICING.claude.inputPerM}/1M, output $${API_PRICING.claude.outputPerM}/1M`, ''],
+      ['  Prompt Cost', `$${cl.prompt.toFixed(4)}`],
+      ['  Completion Cost', `$${cl.completion.toFixed(4)}`],
+      ['  Total Cost', `$${clTotal.toFixed(4)}`],
+      ['  Total Cost (CNY)', `¥${(clTotal * 7.2).toFixed(2)}`],
     ];
 
     const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
     wsSummary['!cols'] = [{ wch: 35 }, { wch: 30 }];
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, wsFiles, isZh ? '逐文件统计' : 'Per-File Stats');
     XLSX.utils.book_append_sheet(wb, wsSummary, isZh ? '汇总' : 'Summary');
+    XLSX.utils.book_append_sheet(wb, wsFiles, isZh ? '逐文件统计' : 'Per-File Stats');
 
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     return buf.buffer ?? buf; // ensure ArrayBuffer
@@ -563,8 +596,8 @@ class TokenStatisticsService {
    * @param {string} [locale='zh'] - Report language ('zh' or 'en')
    * @param {Object} [pricing] - Pricing information
    */
-  downloadReport(sessionStats, fileName, locale = 'zh', pricing = null) {
-    const csv = this.generateReport(sessionStats, locale, pricing);
+  downloadReport(sessionStats, fileName, locale = 'zh') {
+    const csv = this.generateReport(sessionStats, locale);
     if (!csv) {
       console.error('❌ Failed to generate token statistics report');
       return;
