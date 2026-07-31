@@ -11,6 +11,7 @@ import {
   getServerLog,
   parseDefectDetectionResults,
   locateSnippetInFile,
+  extractHintLine,
   deduplicateDefects,
   withLineNumbers,
   isPromptAckOrMetaResponse,
@@ -200,7 +201,8 @@ function locateChunkDefects(defects, fileContent, chunk, fileInfo) {
   const fallbackFunc = guessChunkFunctionName(chunk.content);
   return defects.map((d) => {
     const updated = { ...d, file: fileInfo.path };
-    const located = locateSnippetInFile(d.snippet, fileContent, null);
+    const hintLine = extractHintLine(d.lines) ?? (d.xline || null);
+    const located = locateSnippetInFile(d.snippet, fileContent, null, hintLine, d.function);
     if (located && located.located) {
       updated.lines = located.lines;
       updated._linesSource = 'snippet';

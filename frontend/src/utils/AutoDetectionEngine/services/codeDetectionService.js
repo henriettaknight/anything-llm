@@ -561,7 +561,13 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
         const isPairedCpp = pairedFile && defect.file && defect.file.endsWith('.cpp') && defect.file !== fileInfo.path;
         const targetContent = isPairedCpp ? pairedFile.content : content;
         const altContent = isPairedCpp ? content : (pairedFile ? pairedFile.content : null);
-        const located = locateSnippetInFile(defect.snippet, targetContent, altContent);
+        const located = locateSnippetInFile(
+          defect.snippet,
+          targetContent,
+          altContent,
+          extractHintLine(defect.lines) ?? (defect.xline || null),
+          defect.function
+        );
         if (located.located) {
           return { ...defect, lines: located.lines, linesFromModel: false };
         }
@@ -979,7 +985,63 @@ export function parseDefectDetectionResults(response, filePath) {
  * @param {string|null} [altContent] - 配对文件内容（.cpp），主文件未命中时再查
  * @returns {{lines: string, located: boolean, usedAlt: boolean}}
  */
-export function locateSnippetInFile(snippet, fileContent, altContent = null) {
+/**
+ * 从模型返回的行号字段（如 "L3868"、"L3868-L3870" 或数字）中提取首个行号数字，
+ * 用作 locateSnippetInFile 的消歧提示（hintLine）。提取失败返回 null。
+ * @param {string|number} lines
+ * @returns {number|null}
+ */
+export function extractHintLine(lines) {
+  if (typeof lines === 'number' && !Number.isNaN(lines)) return lines;
+  if (!lines) return null;
+  const m = String(lines).match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/**
+ * 在归一化文件行中按函数名定位函数起止行（花括号平衡）。
+ * 返回 {start, end}（真实行号）或 null。用于把 snippet 候选限制在模型所指函数体内，
+ * 避免把缺陷错挂到结构相似的其他函数（如 gui.cpp 的重复 `des_info = CORE_NEW` 模式）。
+ * @param {Array<{norm:string, line:number}>} normLines
+ * @param {string} functionName
+ * @returns {{start:number, end:number}|null}
+ */
+function findFunctionRange(normLines, functionName) {
+  if (!functionName) return null;
+  // 候选名：全名 + 去掉类名限定后的尾名（如 "Gui::GetGuiEffectInfo" → 也试 "GetGuiEffectInfo"）
+  const names = [functionName];
+  const tail = functionName.split('::').pop();
+  if (tail && tail !== functionName) names.push(tail);
+
+  let sigIdx = -1;
+  for (let i = 0; i < normLines.length; i++) {
+    const t = normLines[i].norm;
+    if (names.some((n) => t.includes(n + '('))) {
+      sigIdx = i;
+      break;
+    }
+  }
+  if (sigIdx < 0) return null;
+
+  // 从签名行起做花括号平衡，找到函数结束行
+  let depth = 0;
+  let started = false;
+  let endIdx = normLines.length - 1;
+  for (let i = sigIdx; i < normLines.length; i++) {
+    const t = normLines[i].norm;
+    for (const ch of t) {
+      if (ch === '{') { depth++; started = true; }
+      else if (ch === '}') { depth--; }
+    }
+    if (started && depth === 0) {
+      endIdx = i;
+      break;
+    }
+  }
+  return { start: normLines[sigIdx].line, end: normLines[endIdx].line };
+}
+
+export function locateSnippetInFile(snippet, fileContent, altContent = null, hintLine = null, functionName = null) {
   const fallback = { lines: '', located: false, usedAlt: false };
   if (!snippet || (!fileContent && !altContent)) return fallback;
 
@@ -1003,44 +1065,71 @@ export function locateSnippetInFile(snippet, fileContent, altContent = null) {
   const snippetLines = buildLines(snippet).map((d) => d.norm);
   if (snippetLines.length === 0) return fallback;
 
-  const tryLocate = (content) => {
-    if (!content) return null;
+  // 函数名约束：在模型所指函数体内接受候选，避免错挂到相似函数（改进点 b）
+  const funcRange = functionName ? findFunctionRange(buildLines(fileContent || altContent || ''), functionName) : null;
+
+  // 收集所有候选命中（不再只取第一个），供 hintLine 在重复代码模式下消歧。
+  const tryLocateAll = (content) => {
+    if (!content) return [];
     const fileLines = buildLines(content);
+    const candidates = [];
     // 单行 snippet：退化为子串匹配
     if (snippetLines.length === 1) {
       const target = snippetLines[0];
       for (const fl of fileLines) {
-        if (fl.norm.includes(target)) return { start: fl.line, end: fl.line };
+        if (fl.norm.includes(target)) candidates.push({ start: fl.line, end: fl.line });
       }
-      return null;
-    }
-    // 多行 snippet：以全部行作为窗口在文件行中滑动匹配
-    const winLen = snippetLines.length;
-    for (let i = 0; i + winLen <= fileLines.length; i++) {
-      let match = true;
-      for (let j = 0; j < winLen; j++) {
-        if (fileLines[i + j].norm.indexOf(snippetLines[j]) === -1) {
-          match = false;
-          break;
+    } else {
+      // 多行 snippet：以全部行作为窗口在文件行中滑动匹配
+      const winLen = snippetLines.length;
+      for (let i = 0; i + winLen <= fileLines.length; i++) {
+        let match = true;
+        for (let j = 0; j < winLen; j++) {
+          if (fileLines[i + j].norm.indexOf(snippetLines[j]) === -1) {
+            match = false;
+            break;
+          }
+        }
+        if (match) candidates.push({ start: fileLines[i].line, end: fileLines[i + winLen - 1].line });
+      }
+      // 退化：只用 snippet 首行子串定位起点
+      if (candidates.length === 0) {
+        const first = snippetLines[0];
+        for (const fl of fileLines) {
+          if (fl.norm.includes(first)) candidates.push({ start: fl.line, end: fl.line });
         }
       }
-      if (match) return { start: fileLines[i].line, end: fileLines[i + winLen - 1].line };
     }
-    // 退化：只用 snippet 首行子串定位起点
-    const first = snippetLines[0];
-    for (const fl of fileLines) {
-      if (fl.norm.includes(first)) return { start: fl.line, end: fl.line };
+    // 函数名约束：仅保留落在函数体内的候选；约束失效（0 命中）时回退到全部候选，避免漏报
+    if (funcRange && candidates.length > 0) {
+      const inRange = candidates.filter((c) => c.start >= funcRange.start && c.end <= funcRange.end);
+      if (inRange.length > 0) return inRange;
     }
-    return null;
+    return candidates;
   };
 
-  let range = tryLocate(fileContent);
+  let candidates = tryLocateAll(fileContent);
   let usedAlt = false;
-  if (!range && altContent) {
-    range = tryLocate(altContent);
+  if (candidates.length === 0 && altContent) {
+    candidates = tryLocateAll(altContent);
     usedAlt = true;
   }
-  if (!range) return fallback;
+  if (candidates.length === 0) return fallback;
+
+  // 多匹配时优先选离 hintLine 最近者（消歧重复代码模式，如 gui.cpp 的
+  // `des_info = CORE_NEW(CDesignInfo)` 同时出现在 L3248 与 L3854）；
+  // 仅一个候选或没有 hint 时保持原行为（取首个），向后兼容。
+  let range = candidates[0];
+  if (candidates.length > 1 && typeof hintLine === 'number' && !Number.isNaN(hintLine)) {
+    let bestDist = Infinity;
+    for (const c of candidates) {
+      const dist = Math.abs(c.start - hintLine);
+      if (dist < bestDist) {
+        bestDist = dist;
+        range = c;
+      }
+    }
+  }
 
   const lines = range.start === range.end ? `L${range.start}` : `L${range.start}-L${range.end}`;
   return { lines, located: true, usedAlt };
