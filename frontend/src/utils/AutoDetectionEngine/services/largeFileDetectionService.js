@@ -388,7 +388,6 @@ export async function detectLargeFileDefects({ fileInfo, fileContent, projectTyp
  */
 export async function detectLargeHeaderWithImpl({ headerFileInfo, headerContent, implFileInfo, implContent, projectType }) {
   const serverLog = getServerLog();
-  const detectionStartTime = Date.now();
 
   const headerLines = (headerContent || '').split('\n').length;
   const implLines = (implContent || '').split('\n').length;
@@ -448,24 +447,6 @@ export async function detectLargeHeaderWithImpl({ headerFileInfo, headerContent,
       failedReasons: subCoverages.flatMap(c => c.failedReasons || []),
       chunks: subCoverages.flatMap(c => (c.chunks || []).map(k => ({ ...k, role: c.role }))),
     };
-
-    // 记录 token 统计（合并两端）
-    try {
-      const pathParts = (headerFileInfo.path || '').split('/').filter(p => p && p !== '.');
-      const moduleName = pathParts.length <= 1 ? 'root' : pathParts[0];
-      tokenStatisticsService.recordFileTokens(
-        headerFileInfo.name,
-        headerFileInfo.path,
-        null,
-        '',
-        '',
-        moduleName,
-        Date.now() - detectionStartTime,
-        { totalLines: headerLines + implLines, codeLines: 0, commentLines: 0 }
-      );
-    } catch (tokenErr) {
-      serverLog?.error(`[方案5] 记录 token 统计失败:`, tokenErr);
-    }
 
     return { defects: finalDefects, coverage, manifest: coverage.chunks, mode: 'header+impl-split' };
   } catch (err) {
