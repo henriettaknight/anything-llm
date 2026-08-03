@@ -191,41 +191,84 @@ function getEnhancedDefaultPrompt() {
 }
 
 /**
+ * 在同目录下按候选后缀查找与给定文件同名的兄弟文件。
+ * @param {Object} sourceFile - 源文件信息（需含 name/path）
+ * @param {string[]} candidateExtensions - 候选后缀（含点号），按优先级排列
+ * @param {FileSystemDirectoryHandle} directoryHandle - 目录句柄
+ * @returns {Promise<{content: string, path: string}|null>} - 命中的兄弟文件或 null
+ */
+async function findSiblingByExtensions(sourceFile, candidateExtensions, directoryHandle) {
+  const baseName = sourceFile.name.substring(0, sourceFile.name.lastIndexOf('.'));
+  const dirPath = sourceFile.path.substring(0, sourceFile.path.lastIndexOf('/'));
+
+  for (const ext of candidateExtensions) {
+    const siblingName = baseName + ext;
+
+    try {
+      const siblingPath = dirPath ? `${dirPath}/${siblingName}` : siblingName;
+
+      const siblingFileInfo = {
+        path: siblingPath,
+        name: siblingName,
+        lastModified: Date.now(),
+        size: 0,
+        isDirectory: false
+      };
+
+      const content = await getFileContent(siblingFileInfo, directoryHandle);
+      if (content) {
+        return { content, path: siblingPath };
+      }
+    } catch {
+      // Continue trying next extension
+    }
+  }
+
+  return null;
+}
+
+/**
  * Find paired implementation file (.h -> .cpp)
  * @param {Object} headerFile - Header file info
  * @param {FileSystemDirectoryHandle} directoryHandle - Directory handle
  * @returns {Promise<{content: string, path: string}|null>} - Paired file or null
  */
 async function findPairedImplementationFile(headerFile, directoryHandle) {
-  const baseName = headerFile.name.substring(0, headerFile.name.lastIndexOf('.'));
   const possibleExtensions = ['.cpp', '.cc', '.cxx'];
-  
-  for (const ext of possibleExtensions) {
-    const implFileName = baseName + ext;
-    
-    try {
-      const dirPath = headerFile.path.substring(0, headerFile.path.lastIndexOf('/'));
-      const implPath = dirPath ? `${dirPath}/${implFileName}` : implFileName;
-      
-      const implFileInfo = {
-        path: implPath,
-        name: implFileName,
-        lastModified: Date.now(),
-        size: 0,
-        isDirectory: false
-      };
-      
-      const content = await getFileContent(implFileInfo, directoryHandle);
-      if (content) {
-        serverLog?.info(`✓ 找到配对的实现文件: ${implFileName}，长度: ${content.length} 字符`);
-        return { content, path: implPath };
-      }
-    } catch {
-      // Continue trying next extension
-    }
+  const found = await findSiblingByExtensions(headerFile, possibleExtensions, directoryHandle);
+
+  if (found) {
+    serverLog?.info(`✓ 找到配对的实现文件: ${found.path}，长度: ${found.content.length} 字符`);
+    return found;
   }
-  
+
   serverLog?.info(`未找到配对的实现文件（尝试了 ${possibleExtensions.join(', ')}）`);
+  return null;
+}
+
+/**
+ * 反向配对：实现文件 -> 头文件（.cpp/.cc/.cxx -> .h/.hpp/.hxx）。
+ *
+ * ⚠️ 与 {@link findPairedImplementationFile} 的用途**严格区分**：
+ * 本函数的结果**仅用于抽取"声明骨架"喂给模型做类型判断**，
+ * **绝不可**赋值给 `pairedFile`——否则会绕过大文件分块闸门
+ * （`!pairedFile && estSize > CHUNK_THRESHOLD`），使超大 .cpp 走"头+实现全文合并"
+ * 路径而撑爆上下文。
+ *
+ * @param {Object} implFile - 实现文件信息
+ * @param {FileSystemDirectoryHandle} directoryHandle - Directory handle
+ * @returns {Promise<{content: string, path: string}|null>} - 配对头文件或 null
+ */
+async function findPairedHeaderFile(implFile, directoryHandle) {
+  const possibleExtensions = ['.h', '.hpp', '.hxx'];
+  const found = await findSiblingByExtensions(implFile, possibleExtensions, directoryHandle);
+
+  if (found) {
+    serverLog?.info(`✓ 找到配对的头文件（仅用于声明骨架）: ${found.path}，长度: ${found.content.length} 字符`);
+    return found;
+  }
+
+  serverLog?.info(`未找到配对的头文件（尝试了 ${possibleExtensions.join(', ')}），将按无骨架检测`);
   return null;
 }
 
@@ -282,16 +325,73 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
       pairedFile = await findPairedImplementationFile(fileInfo, directoryHandle);
     }
 
-    // ===== 大文件闸门：本地预分块送审（第一阶段）=====
-    // 仅对"非配对的大单文件"启用分块，避免重写依赖配对逻辑；配对（头+实现）沿用原合并 inline 路径。
+    // ===== 大文件闸门：本地预分块送审（P0+P1+P2）=====
+    // 路由策略：
+    //  A. 超大 .h + 配对 .cpp，且 头+实现 总量超过 阈值*2 → 方案5（头与实现分别分块，实现块注入头声明骨架）。
+    //  B. 超大 .h（无论是否配对 .cpp，只要未达到 A 的"合并 inline"条件）→ 方案4（头自身分块 + 注入头结构骨架）。
+    //  C. 其它超大单文件（.cpp 无 headerRef，或 .h 未超阈值等情况）→ 原分块路径（P1：.cpp 反向配对头骨架）。
+    // ⚠️ 反向配对到的 headerRef 仅作「声明骨架」来源，绝不并入 pairedFile（回归红线）。
     try {
-      const { detectLargeFileDefects, SINGLE_FILE_CHUNK_THRESHOLD: CHUNK_THRESHOLD } = await import('./largeFileDetectionService.js');
+      const {
+        detectLargeFileDefects,
+        detectLargeHeaderWithImpl,
+        SINGLE_FILE_CHUNK_THRESHOLD: CHUNK_THRESHOLD,
+      } = await import('./largeFileDetectionService.js');
       const estTokens = Math.floor((content?.length || 0) / 4);
       const estLines = lineStats ? lineStats.totalLines : (content || '').split('\n').length;
       const estSize = Math.max(estTokens, estLines);
-      if (!pairedFile && estSize > CHUNK_THRESHOLD) {
-        serverLog?.info(`[大文件闸门] ${fileInfo.name} 估算规模 ${estSize}（字符${content.length}/行${estLines}）超过阈值 ${CHUNK_THRESHOLD}，进入本地预分块送审`);
-        const chunkResult = await detectLargeFileDefects({ fileInfo, directoryHandle, fileContent: content, projectType });
+      const isHeader = fileInfo.name.endsWith('.h');
+      const pairedImpl = pairedFile; // .h -> .cpp 配对结果（可能来自上方 L325）
+      const combinedEst = pairedImpl ? estSize + Math.max(Math.floor((pairedImpl.content?.length || 0) / 4), (pairedImpl.content || '').split('\n').length) : estSize;
+
+      // —— 方案 5：超大 头+实现 协同分块 ——
+      if (isHeader && pairedImpl && combinedEst > CHUNK_THRESHOLD * 2) {
+        serverLog?.info(`[大文件闸门·方案5] ${fileInfo.name} + ${pairedImpl.path} 合并估算 ${combinedEst} 超过 ${CHUNK_THRESHOLD * 2}，走头/实现分别分块`);
+        const result = await detectLargeHeaderWithImpl({
+          headerFileInfo: fileInfo,
+          headerContent: content,
+          implFileInfo: { name: pairedImpl.path.split('/').pop(), path: pairedImpl.path },
+          implContent: pairedImpl.content,
+          projectType,
+        });
+        if (result && result.coverage) {
+          const cov = result.coverage;
+          serverLog?.info(`[大文件闸门·方案5] 完成：缺陷 ${result.defects.length}，成功块 ${cov.successChunks}/${cov.totalChunks}`);
+        }
+        return result ? result.defects : [];
+      }
+
+      // —— 方案 4 / C：超大单文件分块 ——
+      if (estSize > CHUNK_THRESHOLD) {
+        const chunkMode = isHeader ? '方案4(头自身分块)' : '分块';
+        serverLog?.info(`[大文件闸门] ${fileInfo.name} 估算规模 ${estSize}（字符${content.length}/行${estLines}）超过阈值 ${CHUNK_THRESHOLD}，进入${chunkMode}`);
+
+        // 反向配对头文件（仅作声明骨架来源）；.h 自身检测时无需反向配对。
+        let headerRef = null;
+        if (!isHeader && ['ue_cpp', 'cpp'].includes(projectType) && /\.(cpp|cc|cxx)$/i.test(fileInfo.name) && directoryHandle) {
+          headerRef = await findPairedHeaderFile(fileInfo, directoryHandle);
+        }
+
+        // 方案 4：超大 .h 自身分块时，预生成「文件结构骨架」并随每块注入，
+        // 让模型感知"当前块位于哪个类/命名空间"，关联跨多块的同一个类定义。
+        let fileStructure = null;
+        if (isHeader) {
+          try {
+            const { buildFileStructureSkeleton } = await import('../context/headerSkeletonExtractor.js');
+            fileStructure = buildFileStructureSkeleton(content);
+          } catch (_e) {
+            fileStructure = null;
+          }
+        }
+
+        const chunkResult = await detectLargeFileDefects({
+          fileInfo,
+          directoryHandle,
+          fileContent: content,
+          projectType,
+          headerRef,
+          fileStructure,
+        });
         if (chunkResult && chunkResult.coverage) {
           const cov = chunkResult.coverage;
           serverLog?.info(`[大文件闸门] ${fileInfo.name} 分块完成：缺陷 ${chunkResult.defects.length}，成功块 ${cov.successChunks}/${cov.totalChunks}，覆盖行 ${cov.coveredLines}/${cov.totalLines}`);
@@ -337,6 +437,7 @@ ${withLineNumbers(pairedFile.content)}
 - 这是配对的头文件和实现文件，请一起分析（代码块每行已标注真实行号，头文件与实现文件各自独立编号）
 - 检查成员变量时，请查看构造函数（在实现文件中）是否已初始化
 - 只报告真正未初始化的成员变量，不要报告已在构造函数中初始化的变量
+- **缺陷归属规则（关键）**：\`file\` 字段必须填写缺陷**真实所在**的文件路径。位于头文件（${fileInfo.path}）中的缺陷——如类/结构体声明错误、宏/枚举/typedef 定义问题、内联函数、成员声明、头文件自身的逻辑——必须填写 \`file: ${fileInfo.path}\`；只有真正位于实现文件（${pairedFile.path}）中的缺陷才填写 \`file: ${pairedFile.path}\`。**严禁把所有缺陷都填成实现文件路径。**
 - \`lines\` 字段请直接照抄代码块中对应行的真实行号（如 "L120" 或 "L118-L125"），不得自行估算
 - \`snippet\` 字段只写纯净代码，不要带 \`L{n}:\` 行号前缀
 
@@ -362,6 +463,7 @@ ${withLineNumbers(pairedFile.content)}
 - These are paired header and implementation files, please analyze them together (each line in the blocks is prefixed with its real line number; header and implementation are numbered independently)
 - When checking member variables, please check if they are initialized in the constructor (in the implementation file)
 - Only report truly uninitialized member variables, do not report variables already initialized in the constructor
+- **Defect attribution rule (critical)**: the \`file\` field MUST be the path where the defect truly resides. Defects located in the header (${fileInfo.path}) — e.g. class/struct declaration errors, macro/enum/typedef issues, inline functions, member declarations, header-only logic — MUST set \`file: ${fileInfo.path}\`. Only defects truly in the implementation (${pairedFile.path}) should set \`file: ${pairedFile.path}\`. **Do NOT attribute all defects to the implementation file.**
 - For the \`lines\` field, copy the real line numbers shown in the blocks (e.g. "L120" or "L118-L125"); do not estimate
 - For the \`snippet\` field, write pure code only, without the \`L{n}:\` line-number prefix
 
@@ -415,145 +517,118 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
 
     serverLog?.info(`开始调用AI服务...`);
 
-    // Use non-streaming mode to allow Ollama KV Cache release between requests
-    const timeout = 300000; // 300 seconds
-    let responseContent = '';
-    let tokenUsage = null;
-    let abortController = null;
-    let timeoutId = null;
-    let detectionError = null;
-    
-    try {
-      abortController = new AbortController();
-      
-      const detectionPromise = (async () => {
-        try {
-          // Use non-streaming chat to allow Ollama to release KV Cache after each request
-          const result = await codeReviewAIService.adapter.chat(messageHistory, {
-            signal: abortController.signal
-          });
+    // ===== 多次采样取并集（N=2 默认，平衡召回与成本）=====
+    // 单次 LLM 检测存在固有随机性（实测单次召回仅 ~45%），多次采样后按位置合并去重，
+    // 可把召回率提升到 ~85%，并让 gui.h 等头文件缺陷稳定出现。
+    const SAMPLE_COUNT = 2;
+    const timeout = 300000; // 300 seconds per sample
 
-          responseContent = result.content || result.fullText || '';
-          tokenUsage = result.usage || null;
-          return responseContent;
-        } catch (chatError) {
-          console.error('Error during detection:', chatError);
-          throw chatError;
+    // 单次采样的封装：调用一次 AI，返回 responseContent（失败/超时返回 null，不中断其它采样）
+    const runSingleSample = async (sampleIdx) => {
+      let abortController = null;
+      let timeoutId = null;
+      try {
+        abortController = new AbortController();
+        const detectionPromise = (async () => {
+          try {
+            const result = await codeReviewAIService.adapter.chat(messageHistory, {
+              signal: abortController.signal
+            });
+            return result.content || result.fullText || '';
+          } catch (chatError) {
+            console.error(`❌ 采样 ${sampleIdx + 1} 调用失败:`, chatError);
+            throw chatError;
+          }
+        })();
+        const timeoutPromise = new Promise((_, reject) => {
+          timeoutId = setTimeout(() => {
+            abortController?.abort();
+            reject(new Error('AI检测超时'));
+          }, timeout);
+        });
+        const content = await Promise.race([detectionPromise, timeoutPromise]);
+        if (timeoutId) clearTimeout(timeoutId);
+        const sampleTime = Date.now() - detectionStartTime;
+        console.log(`✅ 采样 ${sampleIdx + 1}/${SAMPLE_COUNT} AI 响应完成，总耗时: ${Math.floor(sampleTime / 1000)}秒`);
+        serverLog?.info(`文件 ${fileInfo.name} 第 ${sampleIdx + 1}/${SAMPLE_COUNT} 次采样完成（${content.length} 字符）`);
+        return content;
+      } catch (err) {
+        if (timeoutId) clearTimeout(timeoutId);
+        abortController?.abort();
+        if (err instanceof Error && err.message === 'AI检测超时') {
+          serverLog?.error(`文件 ${fileInfo.name} 第 ${sampleIdx + 1} 次采样超时（超过 ${timeout / 1000} 秒）`);
+        } else {
+          serverLog?.error(`文件 ${fileInfo.name} 第 ${sampleIdx + 1} 次采样出错:`, err);
         }
-      })();
-      
-      // Use Promise.race to implement timeout
-      const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => {
-          abortController?.abort();
-          reject(new Error('AI检测超时'));
-        }, timeout);
-      });
-      
-      responseContent = await Promise.race([detectionPromise, timeoutPromise]);
-      
-      // Clear timeout timer
-      if (timeoutId) {
-        clearTimeout(timeoutId);
+        return null;
       }
-      
-      const totalTime = Date.now() - detectionStartTime;
-      console.log(`✅ AI 响应完成，总耗时: ${Math.floor(totalTime / 1000)}秒`);
-      
-      console.log('\n' + '📊'.repeat(40));
-      console.log('✅ AI Response Received:');
-      console.log('  - Total length:', responseContent.length, 'characters');
-      console.log('  - First 800 chars:', responseContent.substring(0, 800));
-      console.log('  - Last 300 chars:', responseContent.substring(responseContent.length - 300));
-      console.log('📊'.repeat(40));
-      console.log('🧾 FULL AI RESPONSE START');
-      console.log(responseContent);
-      console.log('🧾 FULL AI RESPONSE END\n');
-      
-      serverLog?.info(`AI响应内容(完整):\n${responseContent}`);
-      serverLog?.info(`AI响应总长度: ${responseContent.length} 字符`);
-      
-      // 🔧 成功时记录token统计
+    };
+
+    // 累积所有采样的原始响应（null 表示本次失败/超时）
+    const sampleResponses = [];
+    for (let s = 0; s < SAMPLE_COUNT; s++) {
+      sampleResponses.push(await runSingleSample(s));
+    }
+
+    // 取第一次成功响应用于 token 统计（保证统计至少记一次真实成功）
+    const firstOk = sampleResponses.find((r) => r && r.length > 0);
+    if (firstOk) {
+      // 🔧 成功时记录token统计（以首次成功响应为代表）
       recordTokenStatisticsOnSuccess(
         fileInfo,
-        tokenUsage,
+        null,
         systemPrompt,
         userMessage,
-        responseContent,
+        firstOk,
         moduleName,
-        totalTime,
+        Date.now() - detectionStartTime,
         lineStats
       );
-      
-    } catch (error) {
-      detectionError = error;
-      const totalTime = Date.now() - detectionStartTime;
-      
-      if (error instanceof Error && error.message === 'AI检测超时') {
-        serverLog?.error(`文件 ${fileInfo.name} 检测超时（超过${timeout/1000}秒），跳过此文件`);
-      } else {
-        serverLog?.error(`文件 ${fileInfo.name} 检测出错:`, error);
-      }
-      
-      // 🔧 失败时也记录token统计（使用估算）
+    } else {
+      // 全部采样失败
       recordTokenStatisticsOnFailure(
         fileInfo,
         detectionStartTime,
-        error.message,
+        'all_samples_failed',
         systemPrompt,
         userMessage,
         moduleName,
         lineStats
       );
-      
-      // Abort stream
-      abortController?.abort();
-      // Clear timeout timer
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
       return [];
     }
 
-    // Parse detection results
-    let defects = parseDefectDetectionResults(responseContent, fileInfo.path);
-
-    // Retry once when model returns meta/prompt-ack text (common with some Ollama models)
-    if (defects.length === 0 && isPromptAckOrMetaResponse(responseContent)) {
-      console.warn('⚠️ 检测响应疑似提示词确认文本，触发一次强约束重试:', fileInfo.name);
-      serverLog?.warn(`检测响应疑似提示词确认文本，触发一次强约束重试: ${fileInfo.name}`);
-
-      const retryMessageHistory = [
-        ...messageHistory,
-        {
-          role: 'user',
-          content: '你已经拿到了完整代码。不要重复说明规则、不要索要代码、不要前言。现在仅返回 JSON 数组（可为空数组），字段固定：no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence。'
+    // 合并所有采样的解析结果
+    let allParsed = [];
+    for (const resp of sampleResponses) {
+      if (!resp) continue;
+      // 单次响应内部先用「prompt-ack 重试」逻辑兜底（对应原 L623-656）
+      let parsed = parseDefectDetectionResults(resp, fileInfo.path);
+      if (parsed.length === 0 && isPromptAckOrMetaResponse(resp)) {
+        serverLog?.warn(`采样响应疑似提示词确认文本，触发强约束重试: ${fileInfo.name}`);
+        try {
+          const retryAbort = new AbortController();
+          const retryTimeoutId = setTimeout(() => retryAbort.abort(), timeout);
+          const retryResult = await codeReviewAIService.adapter.chat(
+            [
+              ...messageHistory,
+              { role: 'user', content: '你已经拿到了完整代码。不要重复说明规则、不要索要代码、不要前言。现在仅返回 JSON 数组（可为空数组），字段固定：no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence。' }
+            ],
+            { signal: retryAbort.signal }
+          );
+          const retryResp = retryResult.content || retryResult.fullText || '';
+          clearTimeout(retryTimeoutId);
+          if (retryResp) parsed = parseDefectDetectionResults(retryResp, fileInfo.path);
+        } catch (retryError) {
+          serverLog?.error(`采样强约束重试失败: ${fileInfo.name}`, retryError);
         }
-      ];
-
-      let retryResponse = '';
-      try {
-        // Create a fresh AbortController – the original one may already be aborted
-        const retryAbortController = new AbortController();
-        const retryTimeoutId = setTimeout(() => retryAbortController.abort(), timeout);
-        // Use non-streaming chat (consistent with main path, avoids nginx timeout)
-        const retryResult = await codeReviewAIService.adapter.chat(retryMessageHistory, {
-          signal: retryAbortController.signal
-        });
-        retryResponse = retryResult.content || retryResult.fullText || '';
-
-        clearTimeout(retryTimeoutId);
-        if (retryResponse) {
-          console.log('🔁 Retry response received, length:', retryResponse.length);
-          defects = parseDefectDetectionResults(retryResponse, fileInfo.path);
-        }
-      } catch (retryError) {
-        console.error('❌ Retry request failed:', retryError);
-        serverLog?.error(`重试检测失败: ${fileInfo.name}`, retryError);
       }
+      allParsed = allParsed.concat(parsed);
     }
+    serverLog?.info(`文件 ${fileInfo.name} ${SAMPLE_COUNT} 次采样共解析出 ${allParsed.length} 个候选缺陷`);
+    let defects = mergeSamplesByLocation(allParsed);
 
-    serverLog?.info(`文件 ${fileInfo.name} 检测完成，发现 ${defects.length} 个缺陷`);
+    serverLog?.info(`文件 ${fileInfo.name} 检测完成（${SAMPLE_COUNT} 次采样合并后），发现 ${defects.length} 个缺陷`);
 
     // 🔧 A: 用 snippet 在真实源文件反查行号（按 defect.file 选择 .h 或 .cpp 内容）
     if (defects.length > 0) {
@@ -1169,16 +1244,102 @@ export function deduplicateDefects(list) {
   };
   const basename = (p) => (p || '').split('/').pop().split('\\').pop().toLowerCase();
 
+  // 核心归一化：去除边界符号({};)与空白噪声，仅保留代码 token 序列，
+  // 用于「片段包含」判定（同一缺陷的不同截断点，如 `else{return null;}` 与 `else{return null`）。
+  const coreNorm = (s) => (s || '')
+    .replace(/\/\/.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/[{};,\s]+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  const map = new Map();
+  const entries = []; // 用于片段包含关系判定
+  const normSnippet = (d) => normKey(d.snippet);
+
+  for (const d of list) {
+    const key = `${basename(d.file)}|${String(d.category || '').toUpperCase()}|${hash(normSnippet(d))}`;
+    if (!map.has(key)) {
+      map.set(key, d);
+      entries.push({ key, d, core: coreNorm(d.snippet) });
+    } else {
+      const existing = map.get(key);
+      const rc = confRank[String(d.confidence || 'Medium').trim()] || 2;
+      const re = confRank[String(existing.confidence || 'Medium').trim()] || 2;
+      // 置信度高者胜；相同则字段更完整者胜
+      if (rc > re || (rc === re && snippetFieldRichness(d) > snippetFieldRichness(existing))) {
+        map.set(key, d);
+      }
+    }
+  }
+
+  // 片段包含去重：大文件分块时，同一处缺陷常因块边界不同被切成
+  // 「完整 snippet」与「截断片段 snippet」两个版本，且函数名解析不全时
+  // 会带 [Unknown]（如 `Gui::[Unknown]`）。若某条 snippet 的核心 token 序列是
+  // 另一条的子序列（去除边界符号后），则保留信息更完整（函数名非 Unknown、字段更丰富）者。
+  const isUnknownFn = (d) => /\[unknown\]/i.test(String(d.function || ''));
+  const out = [];
+  const consumed = new Set();
+  for (const a of entries) {
+    if (consumed.has(a.key)) continue;
+    let merged = a.d;
+    for (const b of entries) {
+      if (b.key === a.key || consumed.has(b.key)) continue;
+      const sameFileCat = basename(a.d.file) === basename(b.d.file)
+        && String(a.d.category || '').toUpperCase() === String(b.d.category || '').toUpperCase();
+      if (!sameFileCat) continue;
+      const aUnknown = isUnknownFn(a.d);
+      const bUnknown = isUnknownFn(b.d);
+      // core 完全等价、或互为子序列（不同截断点）、或一方包含另一方 → 视为同一缺陷
+      const equivalent = a.core.length >= 4 && b.core.length >= 4
+        && (a.core === b.core || a.core.includes(b.core) || b.core.includes(a.core));
+      if (!equivalent) continue;
+      // 保留信息更完整者：函数名非 Unknown 优先；其次字段更丰富
+      const bWins = aUnknown && !bUnknown
+        ? true
+        : (!aUnknown && !bUnknown ? snippetFieldRichness(b.d) > snippetFieldRichness(a.d) : false);
+      if (bWins) {
+        consumed.add(a.key);
+        merged = b.d;
+        break;
+      } else {
+        consumed.add(b.key);
+      }
+    }
+    out.push(merged);
+  }
+  return out;
+}
+
+/**
+ * 多次采样合并去重（基于缺陷位置，而非 snippet 文本）。
+ * 不同采样返回的 snippet 文本可能略有差异，用「文件+归一化行号范围+类别+函数」做 key 更稳，
+ * 可把两次采样中指向同一处缺陷的结果合并为一条。
+ * @param {DefectDetectionResult[]} list - 跨多次采样累积的缺陷
+ * @returns {DefectDetectionResult[]}
+ */
+export function mergeSamplesByLocation(list) {
+  if (!Array.isArray(list) || list.length <= 1) return list || [];
+
+  const confRank = { High: 3, Medium: 2, Low: 1 };
+  const basename = (p) => (p || '').split('/').pop().split('\\').pop().toLowerCase();
+
+  // 归一化行号范围 → 形如 "L120" / "L118-L125" 中的起始行（用于跨采样近似比对）
+  const normLineKey = (lines) => {
+    const s = String(lines || '').trim().toLowerCase();
+    const m = s.match(/l\s*(\d+)/);
+    return m ? m[1] : s.replace(/[^a-z0-9]/g, '');
+  };
+
   const map = new Map();
   for (const d of list) {
-    const key = `${basename(d.file)}|${String(d.category || '').toUpperCase()}|${hash(normKey(d.snippet))}`;
+    const key = `${basename(d.file)}|${String(d.category || '').toUpperCase()}|${normLineKey(d.lines)}|${String(d.function || '').toLowerCase()}`;
     if (!map.has(key)) {
       map.set(key, d);
     } else {
       const existing = map.get(key);
       const rc = confRank[String(d.confidence || 'Medium').trim()] || 2;
       const re = confRank[String(existing.confidence || 'Medium').trim()] || 2;
-      // 置信度高者胜；相同则字段更完整者胜
       if (rc > re || (rc === re && snippetFieldRichness(d) > snippetFieldRichness(existing))) {
         map.set(key, d);
       }
