@@ -33,11 +33,8 @@
  * @property {Object} summary - Summary statistics
  */
 
-// 2026 公开 API 计费标准（美元 / 每百万 token），仅用于本地 gemma4 模型的费用估算参考
-const API_PRICING = {
-  deepseek: { label: 'DeepSeek (V3/R1)', inputPerM: 0.27, outputPerM: 1.10 },
-  claude:   { label: 'Claude Sonnet 4.6', inputPerM: 3, outputPerM: 15 }
-};
+// 费用估算：定价表与汇率统一从 feeConfig.js 导入（费用估算单一数据源）
+import { API_PRICING, USD_TO_CNY } from './feeConfig.js';
 
 // 按单价（每百万 token）估算输入/输出费用
 function estimateCost(pricing, sessionStats) {
@@ -408,12 +405,12 @@ class TokenStatisticsService {
         `  Prompt 费用,$${ds.prompt.toFixed(4)}\n` +
         `  Completion 费用,$${ds.completion.toFixed(4)}\n` +
         `  总费用,$${dsTotal.toFixed(4)}\n` +
-        `  总费用 (人民币),¥${(dsTotal * 7.2).toFixed(2)} (按汇率 1:7.2)\n` +
+        `  总费用 (人民币),¥${(dsTotal * USD_TO_CNY).toFixed(2)} (按汇率 1:${USD_TO_CNY})\n` +
         `Claude Sonnet 4.6 (输入 $${API_PRICING.claude.inputPerM}/1M, 输出 $${API_PRICING.claude.outputPerM}/1M),\n` +
         `  Prompt 费用,$${cl.prompt.toFixed(4)}\n` +
         `  Completion 费用,$${cl.completion.toFixed(4)}\n` +
         `  总费用,$${clTotal.toFixed(4)}\n` +
-        `  总费用 (人民币),¥${(clTotal * 7.2).toFixed(2)} (按汇率 1:7.2)\n` +
+        `  总费用 (人民币),¥${(clTotal * USD_TO_CNY).toFixed(2)} (按汇率 1:${USD_TO_CNY})\n` +
         `\n注意: 标记为"估算"的 Token 数量是基于文本长度的近似值（API 未提供使用数据）\n`;
     } else {
       summary = `\n\nSummary\n` +
@@ -435,12 +432,12 @@ class TokenStatisticsService {
         `  Prompt Cost,$${ds.prompt.toFixed(4)}\n` +
         `  Completion Cost,$${ds.completion.toFixed(4)}\n` +
         `  Total Cost,$${dsTotal.toFixed(4)}\n` +
-        `  Total Cost (CNY),¥${(dsTotal * 7.2).toFixed(2)} (1:7.2)\n` +
+        `  Total Cost (CNY),¥${(dsTotal * USD_TO_CNY).toFixed(2)} (1:${USD_TO_CNY})\n` +
         `Claude Sonnet 4.6 (input $${API_PRICING.claude.inputPerM}/1M, output $${API_PRICING.claude.outputPerM}/1M),\n` +
         `  Prompt Cost,$${cl.prompt.toFixed(4)}\n` +
         `  Completion Cost,$${cl.completion.toFixed(4)}\n` +
         `  Total Cost,$${clTotal.toFixed(4)}\n` +
-        `  Total Cost (CNY),¥${(clTotal * 7.2).toFixed(2)} (1:7.2)\n` +
+        `  Total Cost (CNY),¥${(clTotal * USD_TO_CNY).toFixed(2)} (1:${USD_TO_CNY})\n` +
         `\nNote: Token counts marked as "Estimated" are approximations based on text length (API did not provide usage data)\n`;
     }
 
@@ -544,12 +541,12 @@ class TokenStatisticsService {
       ['  Prompt 费用', `$${ds.prompt.toFixed(4)}`],
       ['  Completion 费用', `$${ds.completion.toFixed(4)}`],
       ['  总费用', `$${dsTotal.toFixed(4)}`],
-      ['  总费用 (人民币)', `¥${(dsTotal * 7.2).toFixed(2)}`],
+      ['  总费用 (人民币)', `¥${(dsTotal * USD_TO_CNY).toFixed(2)}`],
       [`Claude Sonnet 4.6：输入 $${API_PRICING.claude.inputPerM}/1M，输出 $${API_PRICING.claude.outputPerM}/1M`, ''],
       ['  Prompt 费用', `$${cl.prompt.toFixed(4)}`],
       ['  Completion 费用', `$${cl.completion.toFixed(4)}`],
       ['  总费用', `$${clTotal.toFixed(4)}`],
-      ['  总费用 (人民币)', `¥${(clTotal * 7.2).toFixed(2)}`],
+      ['  总费用 (人民币)', `¥${(clTotal * USD_TO_CNY).toFixed(2)}`],
     ] : [
       ['Session ID', sessionStats.sessionId || ''],
       ['Start Time', safeISO(sessionStats.startTime)],
@@ -570,12 +567,12 @@ class TokenStatisticsService {
       ['  Prompt Cost', `$${ds.prompt.toFixed(4)}`],
       ['  Completion Cost', `$${ds.completion.toFixed(4)}`],
       ['  Total Cost', `$${dsTotal.toFixed(4)}`],
-      ['  Total Cost (CNY)', `¥${(dsTotal * 7.2).toFixed(2)}`],
+      ['  Total Cost (CNY)', `¥${(dsTotal * USD_TO_CNY).toFixed(2)}`],
       [`Claude Sonnet 4.6: input $${API_PRICING.claude.inputPerM}/1M, output $${API_PRICING.claude.outputPerM}/1M`, ''],
       ['  Prompt Cost', `$${cl.prompt.toFixed(4)}`],
       ['  Completion Cost', `$${cl.completion.toFixed(4)}`],
       ['  Total Cost', `$${clTotal.toFixed(4)}`],
-      ['  Total Cost (CNY)', `¥${(clTotal * 7.2).toFixed(2)}`],
+      ['  Total Cost (CNY)', `¥${(clTotal * USD_TO_CNY).toFixed(2)}`],
     ];
 
     const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);

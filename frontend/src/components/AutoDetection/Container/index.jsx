@@ -5,7 +5,7 @@ import configService from "@/services/autoDetection/configService";
 import { reportGenerationService } from "@/utils/AutoDetectionEngine/services/reportGenerationService";
 import ConfigPanel from "./ConfigPanel";
 import StatusPanel from "./StatusPanel";
-import ReportPanel from "./ReportPanel";
+import UsageReportPanel from "./UsageReportPanel";
 
 export default function AutoDetectionContainer() {
   const { t } = useTranslation();
@@ -563,9 +563,9 @@ export default function AutoDetectionContainer() {
               </div>
             </div>
 
-            {/* Bottom Row: Reports (Full Width) */}
+            {/* Bottom Row: 用量明细 + 报告 (Full Width) */}
             <div>
-              <ReportPanel
+              <UsageReportPanel
                 reports={reports}
                 onDownload={downloadReport}
                 onDelete={deleteReport}

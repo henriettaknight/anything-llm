@@ -523,7 +523,7 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
     const SAMPLE_COUNT = 2;
     const timeout = 300000; // 300 seconds per sample
 
-    // 单次采样的封装：调用一次 AI，返回 responseContent（失败/超时返回 null，不中断其它采样）
+    // 单次采样的封装：调用一次 AI，返回 {content, usage}（失败/超时返回 null，不中断其它采样）
     const runSingleSample = async (sampleIdx) => {
       let abortController = null;
       let timeoutId = null;
@@ -534,7 +534,8 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
             const result = await codeReviewAIService.adapter.chat(messageHistory, {
               signal: abortController.signal
             });
-            return result.content || result.fullText || '';
+            // 🔧 透传 usage（Ollama 经 directAiProxy 返回的 prompt_eval_count/eval_count 等）
+            return { content: result.content || result.fullText || '', usage: result.usage || null };
           } catch (chatError) {
             console.error(`❌ 采样 ${sampleIdx + 1} 调用失败:`, chatError);
             throw chatError;
@@ -546,12 +547,12 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
             reject(new Error('AI检测超时'));
           }, timeout);
         });
-        const content = await Promise.race([detectionPromise, timeoutPromise]);
+        const sample = await Promise.race([detectionPromise, timeoutPromise]);
         if (timeoutId) clearTimeout(timeoutId);
         const sampleTime = Date.now() - detectionStartTime;
         console.log(`✅ 采样 ${sampleIdx + 1}/${SAMPLE_COUNT} AI 响应完成，总耗时: ${Math.floor(sampleTime / 1000)}秒`);
-        serverLog?.info(`文件 ${fileInfo.name} 第 ${sampleIdx + 1}/${SAMPLE_COUNT} 次采样完成（${content.length} 字符）`);
-        return content;
+        serverLog?.info(`文件 ${fileInfo.name} 第 ${sampleIdx + 1}/${SAMPLE_COUNT} 次采样完成（${sample.content.length} 字符）`);
+        return sample;
       } catch (err) {
         if (timeoutId) clearTimeout(timeoutId);
         abortController?.abort();
@@ -571,15 +572,15 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
     }
 
     // 取第一次成功响应用于 token 统计（保证统计至少记一次真实成功）
-    const firstOk = sampleResponses.find((r) => r && r.length > 0);
+    const firstOk = sampleResponses.find((r) => r && r.content && r.content.length > 0);
     if (firstOk) {
-      // 🔧 成功时记录token统计（以首次成功响应为代表）
+      // 🔧 成功时记录token统计（以首次成功响应为代表，携带真实 usage）
       recordTokenStatisticsOnSuccess(
         fileInfo,
-        null,
+        firstOk.usage,
         systemPrompt,
         userMessage,
-        firstOk,
+        firstOk.content,
         moduleName,
         Date.now() - detectionStartTime,
         lineStats
@@ -601,10 +602,10 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
     // 合并所有采样的解析结果
     let allParsed = [];
     for (const resp of sampleResponses) {
-      if (!resp) continue;
+      if (!resp || !resp.content) continue;
       // 单次响应内部先用「prompt-ack 重试」逻辑兜底（对应原 L623-656）
-      let parsed = parseDefectDetectionResults(resp, fileInfo.path);
-      if (parsed.length === 0 && isPromptAckOrMetaResponse(resp)) {
+      let parsed = parseDefectDetectionResults(resp.content, fileInfo.path);
+      if (parsed.length === 0 && isPromptAckOrMetaResponse(resp.content)) {
         serverLog?.warn(`采样响应疑似提示词确认文本，触发强约束重试: ${fileInfo.name}`);
         try {
           const retryAbort = new AbortController();

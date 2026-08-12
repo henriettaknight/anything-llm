@@ -27,7 +27,7 @@ function chatEndpoints(app) {
     async (request, response) => {
       try {
         const user = await userFromSession(request, response);
-        const { message, attachments = [] } = reqBody(request);
+        const { message, attachments = [], feature } = reqBody(request);
         const workspace = response.locals.workspace;
 
         if (!message?.length) {
@@ -67,7 +67,8 @@ function chatEndpoints(app) {
           workspace?.chatMode,
           user,
           null,
-          attachments
+          attachments,
+          feature
         );
         await Telemetry.sendTelemetry("sent_chat", {
           multiUserMode: multiUserMode(response),
@@ -113,7 +114,7 @@ function chatEndpoints(app) {
     async (request, response) => {
       try {
         const user = await userFromSession(request, response);
-        const { message, attachments = [] } = reqBody(request);
+        const { message, attachments = [], feature } = reqBody(request);
         const workspace = response.locals.workspace;
         const thread = response.locals.thread;
 
@@ -154,7 +155,8 @@ function chatEndpoints(app) {
           workspace?.chatMode,
           user,
           thread,
-          attachments
+          attachments,
+          feature
         );
 
         // If thread was renamed emit event to frontend via special `action` response.

@@ -12,6 +12,8 @@
  */
 
 const { Agent } = require("undici");
+const { userFromSession } = require("../utils/http");
+const { recordUsage } = require("../utils/usageLogs");
 
 const PROXY_TIMEOUT = 10 * 60 * 1000;
 const proxyAgent = new Agent({
@@ -124,7 +126,22 @@ function directAiProxyEndpoints(app) {
     "/direct-ai-proxy",
     async (request, response) => {
       try {
-        const { url, body, apiKey } = request.body;
+        const { url, body, apiKey, feature, authToken } = request.body;
+
+        // 优先从 Authorization 头取登录态；代理请求可能把 JWT 放在 body.authToken 兜底
+        let user = await userFromSession(request, response);
+        if (!user && authToken) {
+          try {
+            const valid = require("jsonwebtoken").verify(authToken, process.env.JWT_SECRET);
+            if (valid?.id) {
+              const { User } = require("../models/user");
+              user = await User.get({ id: valid.id });
+            }
+          } catch (_) { /* 无效 token 忽略，userId 留空 */ }
+        }
+        const userId = user?.id || null;
+
+        const requestStartedAt = Date.now();
 
         if (!url || !body) {
           return response.status(400).json({
@@ -248,12 +265,38 @@ function directAiProxyEndpoints(app) {
         const reader = backendResponse.body.getReader();
         const decoder = new TextDecoder();
 
+        // 累积用量统计（ollama 开启 include_usage 后，末尾 chunk 带 prompt_eval_count / eval_count）
+        let promptTokens = 0;
+        let completionTokens = 0;
+
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             const chunk = decoder.decode(value, { stream: true });
             response.write(chunk);
+
+            // 解析 ollama/OpenAI 流式 chunk 中的 usage
+            const lines = chunk.split("\n").filter((l) => l.trim().length > 0);
+            for (const line of lines) {
+              const jsonStr = line.startsWith("data:") ? line.slice(5).trim() : line.trim();
+              if (jsonStr === "[DONE]") continue;
+              try {
+                const parsed = JSON.parse(jsonStr);
+                if (parsed?.usage) {
+                  promptTokens = Number(parsed.usage.prompt_tokens) ||
+                    Number(parsed.usage.prompt_eval_count) || promptTokens;
+                  completionTokens = Number(parsed.usage.completion_tokens) ||
+                    Number(parsed.usage.eval_count) || completionTokens;
+                }
+                if (typeof parsed?.prompt_eval_count === "number") {
+                  promptTokens = parsed.prompt_eval_count;
+                }
+                if (typeof parsed?.eval_count === "number") {
+                  completionTokens = parsed.eval_count;
+                }
+              } catch (_) { /* 非 JSON 行忽略 */ }
+            }
           }
         } finally {
           reader.releaseLock();
@@ -261,6 +304,23 @@ function directAiProxyEndpoints(app) {
         }
 
         console.log('[DirectAIProxy] Stream completed successfully');
+
+        // 代码检测（code_review）用量落库：仅在请求显式带 feature 标记时写 usage_logs
+        if (feature === "code_review" && (promptTokens > 0 || completionTokens > 0)) {
+          const durationMs = Date.now() - requestStartedAt;
+          await recordUsage({
+            userId,
+            feature: "code_review",
+            provider: isOllama ? "ollama" : (isOpenAI ? "openai" : null),
+            model: body?.model || null,
+            durationMs,
+            metrics: {
+              prompt_tokens: promptTokens,
+              completion_tokens: completionTokens,
+              total_tokens: promptTokens + completionTokens,
+            },
+          });
+        }
       } catch (error) {
         const cause = error.cause;
         console.error('[DirectAIProxy] Error:', error.message);

@@ -4,6 +4,7 @@ const { WorkspaceChats } = require("../../models/workspaceChats");
 const { WorkspaceParsedFiles } = require("../../models/workspaceParsedFiles");
 const { getVectorDbClass, getLLMProvider } = require("../helpers");
 const { writeResponseChunk } = require("../helpers/chat/responses");
+const { recordUsage } = require("../../utils/usageLogs");
 const { grepAgents } = require("./agents");
 const {
   grepCommand,
@@ -22,7 +23,8 @@ async function streamChatWithWorkspace(
   chatMode = "chat",
   user = null,
   thread = null,
-  attachments = []
+  attachments = [],
+  feature = null
 ) {
   const uuid = uuidv4();
   const updatedMessage = await grepCommand(message, user);
@@ -274,6 +276,19 @@ async function streamChatWithWorkspace(
       sources,
     });
     metrics = stream.metrics;
+  }
+
+  // 代码检测（code_review）用量落库：仅在请求显式带 feature 标记时写 usage_logs
+  if (feature === "code_review" && metrics) {
+    await recordUsage({
+      userId: user?.id || null,
+      feature: "code_review",
+      provider: workspace?.chatProvider || null,
+      model: workspace?.chatModel || null,
+      metrics,
+      workspaceId: workspace?.id || null,
+      threadId: thread?.id || null,
+    });
   }
 
   if (completeText?.length > 0) {

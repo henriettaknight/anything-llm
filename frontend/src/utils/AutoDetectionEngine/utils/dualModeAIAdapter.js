@@ -8,6 +8,25 @@
 
 import { AIAdapter } from './aiAdapter.js';
 import { getAIMode, getAIConfig, AI_MODES } from '../config/aiModeConfig.js';
+import { AUTH_TOKEN } from '../../../utils/constants.js';
+import { isKeycloakEnabled, getToken } from '../../../utils/keycloak.js';
+
+/**
+ * 取当前登录用户的 JWT：keycloak 模式用 getToken()，否则用 localStorage 中的 AUTH_TOKEN。
+ * 代理请求需要把登录态透传给后端 directAiProxy，用于 usage_logs 的 userId 统计。
+ */
+function getCurrentAuthToken() {
+  try {
+    if (isKeycloakEnabled && isKeycloakEnabled()) {
+      const kc = getToken && getToken();
+      if (kc) return kc;
+    }
+    const stored = typeof window !== "undefined" && window.localStorage.getItem(AUTH_TOKEN);
+    return stored || null;
+  } catch (_) {
+    return null;
+  }
+}
 
 /**
  * Direct AI Adapter - connects directly to 172.16.100.61:8000
@@ -43,13 +62,25 @@ export class DirectAIAdapter {
     const fullUrl = useProxy
       ? '/api/direct-ai-proxy'
       : `${this.url}${apiEndpoint}`;
+    // 代理路径需要把登录态透传给后端，用于 usage_logs 的 userId 统计
+    const authToken = useProxy ? getCurrentAuthToken() : null;
     const requestPayload = useProxy
-      ? { url: `${this.url}${apiEndpoint}`, body: requestBody, apiKey: this.apiKey }
+      ? {
+          url: `${this.url}${apiEndpoint}`,
+          body: requestBody,
+          apiKey: this.apiKey,
+          feature: "code_review",
+          authToken: authToken || undefined,
+        }
       : requestBody;
     const headers = { 'Content-Type': 'application/json' };
-    // Direct request (not proxy) needs Authorization header
+    // Direct request (not proxy) needs Authorization header for the AI endpoint
     if (!useProxy && this.apiKey) {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    // Proxy request needs the user's session JWT so backend can resolve userId
+    if (useProxy && authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
     }
     return { useProxy, apiEndpoint, fullUrl, requestPayload, headers };
   }

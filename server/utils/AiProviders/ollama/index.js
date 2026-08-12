@@ -324,6 +324,7 @@ class OllamaAILLM {
             ? {}
             : { num_ctx: this.promptWindowLimit() }),
         },
+        stream_options: { include_usage: true },
       }),
       messages,
       false

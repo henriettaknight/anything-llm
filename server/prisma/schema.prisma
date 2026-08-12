@@ -192,6 +192,25 @@ model workspace_chats {
   users          users?   @relation(fields: [user_id], references: [id], onDelete: Cascade)
 }
 
+model usage_logs {
+  id              Int      @id @default(autoincrement())
+  userId          Int?
+  feature         String   @default("code_review")
+  provider        String?
+  model           String?
+  promptTokens    Int      @default(0)
+  completionTokens Int     @default(0)
+  totalTokens     Int      @default(0)
+  durationMs      Int?
+  workspaceId     Int?
+  threadId        Int?
+  occurredAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([feature])
+  @@index([occurredAt])
+}
+
 model workspace_agent_invocations {
   id            Int        @id @default(autoincrement())
   uuid          String     @unique

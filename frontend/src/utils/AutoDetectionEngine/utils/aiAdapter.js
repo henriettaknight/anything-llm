@@ -200,6 +200,7 @@ export class AIAdapter {
       message: messages[messages.length - 1]?.content || "",
       mode: "chat",
       attachments: [],
+      feature: "code_review",
     };
 
     // Add system prompt if present - CRITICAL: This must be included for code detection!

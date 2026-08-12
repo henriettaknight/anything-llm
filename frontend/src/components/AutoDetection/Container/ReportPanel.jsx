@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { detectUserLanguage, needsTranslation } from "@/utils/AutoDetectionEngine/utils/languageDetector";
 
-export default function ReportPanel({ reports, onDownload, onDelete }) {
+export default function ReportPanel({ reports, onDownload, onDelete, embedded = false }) {
   const { t, i18n } = useTranslation();
   const [isDownloading, setIsDownloading] = useState({});
   const [isDeleting, setIsDeleting] = useState({});
@@ -60,22 +60,30 @@ export default function ReportPanel({ reports, onDownload, onDelete }) {
     return `report_${formatted}.zip`;
   };
 
+  // 嵌入模式下不渲染外层卡片与标题（由父容器 UsageReportPanel 提供）
+  const wrapperClass = embedded
+    ? ""
+    : "bg-theme-bg-secondary rounded-lg border border-theme-sidebar-border p-6";
+  const header = embedded ? null : (
+    <div className="flex items-center justify-between mb-6">
+      <h2 className="text-xl font-semibold text-theme-text-primary">
+        {t("autodetection.reports.title", "Reports")}
+      </h2>
+      {reports && reports.length > 0 && (
+        <button
+          onClick={() => setDeleteAllConfirm(true)}
+          className="px-3 py-1 bg-gray-50 text-gray-800 text-sm rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border border-gray-200"
+          title={t("autodetection.reports.deleteAllButton", "Delete All")}
+        >
+          {t("autodetection.reports.deleteAllButton", "Delete All")}
+        </button>
+      )}
+    </div>
+  );
+
   return (
-    <div className="bg-theme-bg-secondary rounded-lg border border-theme-sidebar-border p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold text-theme-text-primary">
-          {t("autodetection.reports.title", "Reports")}
-        </h2>
-        {reports && reports.length > 0 && (
-          <button
-            onClick={() => setDeleteAllConfirm(true)}
-            className="px-3 py-1 bg-gray-50 text-gray-800 text-sm rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border border-gray-200"
-            title={t("autodetection.reports.deleteAllButton", "Delete All")}
-          >
-            {t("autodetection.reports.deleteAllButton", "Delete All")}
-          </button>
-        )}
-      </div>
+    <div className={wrapperClass}>
+      {header}
 
       {reports && reports.length > 0 ? (
         <div className="space-y-3">

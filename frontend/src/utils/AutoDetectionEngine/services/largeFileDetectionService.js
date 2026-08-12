@@ -34,6 +34,44 @@ const CHAT_TIMEOUT = 300000;
  * @param {string} content
  * @returns {number}
  */
+/**
+ * 基于整文件内容统计代码行 / 注释行 / 空行（不含系统提示词，结果贴近真实源码）。
+ * 与 tokenStatisticsService._countLines（基于 prompt 文本）区分，本函数直接分析源码。
+ * @param {string} content 整文件源码
+ * @returns {{codeLines:number, commentLines:number, blankLines:number}}
+ */
+function calculateLineStats(content) {
+  const lines = (content || '').split('\n');
+  let codeLines = 0;
+  let commentLines = 0;
+  let blankLines = 0;
+  let inBlockComment = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      blankLines++;
+      continue;
+    }
+    // 块注释处理
+    if (inBlockComment) {
+      commentLines++;
+      if (trimmed.includes('*/')) inBlockComment = false;
+      continue;
+    }
+    if (trimmed.includes('/*')) {
+      commentLines++;
+      if (!trimmed.includes('*/')) inBlockComment = true;
+      continue;
+    }
+    if (trimmed.startsWith('//') || trimmed.startsWith('#')) {
+      commentLines++;
+      continue;
+    }
+    codeLines++;
+  }
+  return { codeLines, commentLines, blankLines };
+}
+
 function estimateSize(content) {
   const charTokens = Math.floor((content?.length || 0) / 4);
   const lineCount = (content || '').split('\n').length;
@@ -311,7 +349,8 @@ export async function detectLargeFileDefects({ fileInfo, fileContent, projectTyp
         allDefects.push(...located);
         aggregatedPrompt += chunkResult.promptText || '';
         aggregatedResponse += chunkResult.responseText || '';
-        if (chunkResult.usage) chunkUsages.push(chunkResult.usage);
+        // 规整推送（含 null），与后续 allHaveUsage 判断配合：任一块缺 usage 则整文件走估算
+        chunkUsages.push(chunkResult.usage || null);
         coverage.successChunks++;
         coverage.coveredLines += (ch.endLine - ch.startLine + 1);
         coverage.chunks.push({ startLine: ch.startLine, endLine: ch.endLine, covered: true, defects: located.length });
@@ -333,7 +372,9 @@ export async function detectLargeFileDefects({ fileInfo, fileContent, projectTyp
 
     // 🔧 记录 token 统计（大文件分块路径此前漏记，导致 token_statistics.xlsx 全 0）
     try {
-      const lineStats = { totalLines, codeLines: 0, commentLines: 0 };
+      // 基于整文件内容统计真实代码行/注释行（此前硬编码为 0，导致报表代码行、注释行全 0）
+      const { codeLines, commentLines } = calculateLineStats(fileContent);
+      const lineStats = { totalLines, codeLines, commentLines };
       // 仅当所有成功块都有 usage 时才用真实数据，否则传 null 走估算（与内联路径一致）
       const allHaveUsage = chunkUsages.length > 0 &&
         chunkUsages.length === coverage.successChunks &&
