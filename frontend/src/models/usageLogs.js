@@ -5,6 +5,8 @@
  * 仅查询当前登录用户自己的 code_review 用量数据。
  */
 
+import { getAuthHeaders } from "@/utils/request";
+
 const API_BASE = "/api/usage-logs";
 
 const UsageLogsAPI = {
@@ -27,6 +29,7 @@ const UsageLogsAPI = {
 
       const res = await fetch(`${API_BASE}/code-review?${params.toString()}`, {
         credentials: "include",
+        headers: await getAuthHeaders(),
       });
       if (!res.ok) {
         return { success: false, error: `HTTP ${res.status}` };
@@ -45,6 +48,7 @@ const UsageLogsAPI = {
     try {
       const res = await fetch(`${API_BASE}/code-review/summary`, {
         credentials: "include",
+        headers: await getAuthHeaders(),
       });
       if (!res.ok) {
         return { success: false, error: `HTTP ${res.status}` };
