@@ -16,7 +16,7 @@ import {
 } from "@/utils/constants";
 import { useTranslation } from "react-i18next";
 
-export default function UserButton() {
+export default function UserButton({ className = "" }) {
   const { t } = useTranslation();
   const mode = useLoginMode();
   const { user } = useUser();
@@ -61,8 +61,12 @@ export default function UserButton() {
   }, []);
 
   if (mode === null) return null;
+  // 默认保持原右上角浮窗定位；传入 className 会覆盖默认定位
+  const containerCls =
+    className ||
+    "absolute top-3 right-4 md:top-9 md:right-10 w-fit h-fit z-40";
   return (
-    <div className="absolute top-3 right-4 md:top-9 md:right-10 w-fit h-fit z-40">
+    <div className={containerCls}>
       <button
         ref={buttonRef}
         onClick={() => setShowMenu(!showMenu)}

@@ -31,6 +31,7 @@ const { mcpServersEndpoints } = require("./endpoints/mcpServers");
 const { mobileEndpoints } = require("./endpoints/mobile");
 const { directAiProxyEndpoints } = require("./endpoints/directAiProxy");
 const { usageLogsEndpoints } = require("./endpoints/usageLogs");
+const { translationEndpoints } = require("./endpoints/translation");
 const { httpLogger } = require("./middleware/httpLogger");
 const app = express();
 const apiRouter = express.Router();
@@ -122,6 +123,7 @@ mcpServersEndpoints(apiRouter);
 mobileEndpoints(apiRouter);
 directAiProxyEndpoints(apiRouter);
 usageLogsEndpoints(apiRouter);
+translationEndpoints(apiRouter);
 
 // Externally facing embedder endpoints
 embeddedEndpoints(apiRouter);

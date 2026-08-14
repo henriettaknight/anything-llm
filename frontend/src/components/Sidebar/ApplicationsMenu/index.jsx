@@ -12,6 +12,10 @@ export default function ApplicationsMenu() {
     navigate(paths.autodetection?.home?.() || "/auto-detection");
   };
 
+  const handleTranslationClick = () => {
+    navigate("/translation");
+  };
+
   return (
     <div className="flex flex-col gap-y-2">
       <button
@@ -20,6 +24,13 @@ export default function ApplicationsMenu() {
       >
         <div className="flex-shrink-0 w-4 h-4 rounded bg-theme-accent-primary ml-0"></div>
         <span className="truncate">{t("autodetection.title", "Auto Detection")}</span>
+      </button>
+      <button
+        onClick={handleTranslationClick}
+        className="flex items-center gap-x-2 px-3 py-2 rounded-lg text-theme-text-secondary hover:bg-theme-bg-secondary transition-all duration-200 w-full text-left text-sm border-2 border-theme-sidebar-border"
+      >
+        <div className="flex-shrink-0 w-4 h-4 rounded bg-theme-accent-secondary ml-0"></div>
+        <span className="truncate">智能翻译</span>
       </button>
     </div>
   );
