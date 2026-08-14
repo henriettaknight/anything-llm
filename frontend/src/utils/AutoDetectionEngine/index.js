@@ -93,7 +93,7 @@ class AutoDetectionEngine {
    * Sets up the dual mode AI adapter and initializes the code review service
    * 
    * Supports both:
-   * - Direct mode: Direct connection to 172.16.100.61:8000 (development only)
+   * - Direct mode: Direct connection to local AI service (development only)
    * - LLM mode: Connection through AnythingLLM backend (production)
    * 
    * @private

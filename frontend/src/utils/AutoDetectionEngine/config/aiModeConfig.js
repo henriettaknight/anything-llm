@@ -1,7 +1,7 @@
 /**
  * AI Mode Configuration
- * Manages switching between direct AI mode (172.16.100.61) and LLM mode
- * 
+ * Manages switching between direct AI mode and LLM mode
+ *
  * Direct mode: Only enabled in development environment with explicit configuration
  * LLM mode: Default mode, used in production and when direct mode is not configured
  */
@@ -44,8 +44,8 @@ export const getAIConfig = () => {
   if (mode === AI_MODES.DIRECT) {
     return {
       mode: 'direct',
-      url: import.meta.env.VITE_DIRECT_AI_URL || 'http://vllm:8000',
-      model: import.meta.env.VITE_DIRECT_AI_MODEL || 'gpt-oss-20b',
+      url: import.meta.env.VITE_DIRECT_AI_URL || 'http://ollama:11434',
+      model: import.meta.env.VITE_DIRECT_AI_MODEL || 'gemma4-31b',
       apiKey: import.meta.env.VITE_DIRECT_AI_API_KEY || null,
       temperature: 0  // 确定性输出，确保检测结果的一致性（与SnailAI保持一致）
     };

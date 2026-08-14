@@ -1,7 +1,7 @@
 /**
  * Dual Mode AI Adapter
- * Supports both direct AI mode (172.16.100.61) and LLM mode
- * 
+ * Supports both direct AI mode and LLM mode
+ *
  * Direct mode: Direct connection to local AI model
  * LLM mode: Connection through AnythingLLM backend
  */
@@ -29,7 +29,7 @@ function getCurrentAuthToken() {
 }
 
 /**
- * Direct AI Adapter - connects directly to 172.16.100.61:8000
+ * Direct AI Adapter - connects directly to local AI service
  */
 export class DirectAIAdapter {
   constructor(config) {
@@ -41,7 +41,7 @@ export class DirectAIAdapter {
 
   /**
    * Determine the API endpoint based on service URL.
-   * Ollama uses port 11434, vLLM/OpenAI use other ports.
+   * Ollama uses port 11434, OpenAI-compatible services use other ports.
    * @private
    * @returns {'/api/chat' | '/v1/chat/completions'}
    */
@@ -147,7 +147,7 @@ export class DirectAIAdapter {
     console.log('\n🌐 Sending HTTP Request:');
     console.log('  - URL:', fullUrl);
     console.log('  - Using proxy:', useProxy);
-    console.log('  - API endpoint:', apiEndpoint, isOllamaService ? '(Ollama)' : '(vLLM/OpenAI)');
+    console.log('  - API endpoint:', apiEndpoint, isOllamaService ? '(Ollama)' : '(OpenAI-compatible)');
     console.log('  - Method: POST');
     console.log('  - Has API Key:', !!this.apiKey);
     console.log('  - Body size:', JSON.stringify(requestBody).length, 'bytes');
@@ -319,7 +319,7 @@ export class DirectAIAdapter {
   }
 
   /**
-   * Parse a single SSE/NDJSON chunk from either Ollama or OpenAI/vLLM format.
+   * Parse a single SSE/NDJSON chunk from either Ollama or OpenAI-compatible format.
    * @private
    * @param {string} rawData - Raw JSON string (after stripping "data: " prefix)
    * @returns {{content: string, usage: Object|null, done: boolean}|null}
@@ -339,10 +339,10 @@ export class DirectAIAdapter {
         return { content: '', usage, done: true };
       }
 
-      // Content from both Ollama and OpenAI/vLLM formats
+      // Content from both Ollama and OpenAI-compatible formats
       const content = parsed.choices?.[0]?.delta?.content || parsed.message?.content || '';
 
-      // Token usage (OpenAI/vLLM format, usually in last chunk)
+      // Token usage (OpenAI-compatible format, usually in last chunk)
       const usage = parsed.usage || null;
 
       return { content, usage, done: false };
@@ -496,18 +496,18 @@ export class DirectAIAdapter {
   }
 
   /**
-   * 从 OpenAI/vLLM/Ollama 的响应中提取文本内容
+   * 从 OpenAI-compatible/Ollama 的响应中提取文本内容
    * @private
    */
   _extractContentFromPayload(payload) {
     if (!payload || typeof payload !== 'object') return '';
 
-    // OpenAI/vLLM non-streaming
+    // OpenAI-compatible non-streaming
     if (payload.choices?.[0]?.message?.content) {
       return payload.choices[0].message.content;
     }
 
-    // OpenAI/vLLM streaming delta
+    // OpenAI-compatible streaming delta
     if (payload.choices?.[0]?.delta?.content) {
       return payload.choices[0].delta.content;
     }
@@ -529,13 +529,13 @@ export class DirectAIAdapter {
   }
 
   /**
-   * 从 OpenAI/vLLM/Ollama 的响应中提取 token 统计
+   * 从 OpenAI-compatible/Ollama 的响应中提取 token 统计
    * @private
    */
   _extractUsageFromPayload(payload) {
     if (!payload || typeof payload !== 'object') return null;
 
-    // OpenAI/vLLM usage
+    // OpenAI-compatible usage
     if (payload.usage && typeof payload.usage === 'object') {
       return payload.usage;
     }
@@ -581,7 +581,7 @@ export class DualModeAIAdapter {
    */
   initAdapter() {
     if (this.mode === AI_MODES.DIRECT) {
-      console.log('📡 Using Direct AI Adapter (172.16.100.61:8000)');
+      console.log('📡 Using Direct AI Adapter');
       this.adapter = new DirectAIAdapter(this.config);
     } else {
       console.log('🔗 Using LLM AI Adapter (AnythingLLM)');
