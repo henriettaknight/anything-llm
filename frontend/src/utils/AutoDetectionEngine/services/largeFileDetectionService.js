@@ -26,8 +26,14 @@ export const SINGLE_FILE_CHUNK_THRESHOLD = 700;
 export const CHUNK_OVERLAP = 150;
 /** 单块内容字符上限兜底（避免极端长行导致单块token爆炸） */
 export const MAX_CHUNK_CHARS = 120000;
-/** 单块 AI 调用超时（ms） */
-const CHAT_TIMEOUT = 300000;
+/**
+ * 单块 AI 调用超时（ms）。
+ * 原值 300000（5 分钟）过短：实测 ollama(gemma4-31b) 单次 /api/chat 耗时
+ * 3~6 分钟，长尾达 6m35s；串行链上偶发接近两块叠加。5 分钟会误杀长尾块
+ * 导致该块被 abort（"Direct AI request was cancelled"）整轮无结果。
+ * 提到 900000（15 分钟）以覆盖长尾；与 dualModeAIAdapter 10 分钟档拉开余量。
+ */
+const CHAT_TIMEOUT = 900000;
 
 /**
  * 估算文件规模：token 近似（字符/4）与行数取较大者。

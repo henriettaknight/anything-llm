@@ -40,7 +40,10 @@ export async function getAuthHeaders(providedToken = null) {
   // Check if Keycloak is enabled
   if (isKeycloakEnabled()) {
     try {
-      // Refresh token if expiring soon (within 5 seconds)
+      // keycloak-js 实例可能从未初始化（本部署的 Keycloak 登录走 Login 页
+      // 手动授权码流，不调用 initKeycloak），此时 updateToken 会抛
+      // "Keycloak not initialized"。回退 localStorage 中的 token
+      // （KeycloakCallback 存的 Keycloak access token），由后端 authAdapter 验证。
       await updateToken();
 
       // Get the current access token
@@ -50,21 +53,17 @@ export async function getAuthHeaders(providedToken = null) {
         return {
           Authorization: `Bearer ${keycloakToken}`,
         };
-      } else {
-        console.warn("Keycloak token not available");
-        return {
-          Authorization: null,
-        };
       }
+      console.warn("Keycloak token not available, falling back to stored auth");
     } catch (error) {
-      console.error("Failed to refresh Keycloak token:", error);
-      // Token refresh failed - redirect to login
-      handleTokenRefreshFailure();
-      throw error;
+      console.warn(
+        "Keycloak token unavailable (not initialized or refresh failed), falling back to stored auth:",
+        error.message
+      );
     }
   }
 
-  // Fall back to existing authentication
+  // Fall back to existing authentication (localStorage AUTH_TOKEN)
   return baseHeaders(providedToken);
 }
 

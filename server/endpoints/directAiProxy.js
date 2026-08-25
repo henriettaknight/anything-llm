@@ -250,9 +250,34 @@ function directAiProxyEndpoints(app) {
         const reader = backendResponse.body.getReader();
         const decoder = new TextDecoder();
 
-        // 累积用量统计（ollama 开启 include_usage 后，末尾 chunk 带 prompt_eval_count / eval_count）
+        // 累积用量统计（ollama 末尾 chunk 带 prompt_eval_count / eval_count）
         let promptTokens = 0;
         let completionTokens = 0;
+
+        // 跨 read 的行缓冲：NDJSON 流可能把一行 JSON 拆在两次 read 之间，
+        // 直接 split("\n") 会解析到半行 JSON 而漏掉 usage（导致用量永为 0、不落库）。
+        let lineBuffer = "";
+        const flushUsageLine = (rawLine) => {
+          const line = rawLine.trim();
+          if (!line) return;
+          const jsonStr = line.startsWith("data:") ? line.slice(5).trim() : line;
+          if (jsonStr === "[DONE]") return;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            if (parsed?.usage) {
+              promptTokens = Number(parsed.usage.prompt_tokens) ||
+                Number(parsed.usage.prompt_eval_count) || promptTokens;
+              completionTokens = Number(parsed.usage.completion_tokens) ||
+                Number(parsed.usage.eval_count) || completionTokens;
+            }
+            if (typeof parsed?.prompt_eval_count === "number") {
+              promptTokens = parsed.prompt_eval_count;
+            }
+            if (typeof parsed?.eval_count === "number") {
+              completionTokens = parsed.eval_count;
+            }
+          } catch (_) { /* 非 JSON 行忽略 */ }
+        };
 
         try {
           while (true) {
@@ -261,28 +286,18 @@ function directAiProxyEndpoints(app) {
             const chunk = decoder.decode(value, { stream: true });
             response.write(chunk);
 
-            // 解析 ollama/OpenAI 流式 chunk 中的 usage
-            const lines = chunk.split("\n").filter((l) => l.trim().length > 0);
-            for (const line of lines) {
-              const jsonStr = line.startsWith("data:") ? line.slice(5).trim() : line.trim();
-              if (jsonStr === "[DONE]") continue;
-              try {
-                const parsed = JSON.parse(jsonStr);
-                if (parsed?.usage) {
-                  promptTokens = Number(parsed.usage.prompt_tokens) ||
-                    Number(parsed.usage.prompt_eval_count) || promptTokens;
-                  completionTokens = Number(parsed.usage.completion_tokens) ||
-                    Number(parsed.usage.eval_count) || completionTokens;
-                }
-                if (typeof parsed?.prompt_eval_count === "number") {
-                  promptTokens = parsed.prompt_eval_count;
-                }
-                if (typeof parsed?.eval_count === "number") {
-                  completionTokens = parsed.eval_count;
-                }
-              } catch (_) { /* 非 JSON 行忽略 */ }
+            // 按行解析，未完成的行留在 lineBuffer 等待下次拼接
+            lineBuffer += chunk;
+            let nlIdx;
+            while ((nlIdx = lineBuffer.indexOf("\n")) !== -1) {
+              const completeLine = lineBuffer.slice(0, nlIdx);
+              lineBuffer = lineBuffer.slice(nlIdx + 1);
+              flushUsageLine(completeLine);
             }
           }
+          // 循环结束后 flush 残留（ollama 末帧常无尾随换行）
+          flushUsageLine(lineBuffer);
+          lineBuffer = "";
         } finally {
           reader.releaseLock();
           response.end();
