@@ -35,19 +35,22 @@ const { streamLlmTranslation } = require("./llmStreamer");
  * @param {Object} opts
  * @param {Object} opts.workspace - workspace 对象
  * @param {string} opts.message - 用户消息（待译原文）
- * @param {string} [opts.glossaryId="default"] - 术语库 ID
+ * @param {string[]} [opts.glossaryIds=["default"]] - 术语库 ID 数组，靠后覆盖靠前
  * @param {Object|null} [opts.thread] - thread 对象（null 表示 workspace 默认对话）
  * @param {Object|null} [opts.user] - 当前用户对象
  * @returns {Promise<string>} 完整译文
  */
 async function workspaceChatAdapter(response, opts) {
-  const { workspace, message, glossaryId = "default", thread, user } = opts;
+  const { workspace, message, glossaryIds = ["default"], thread, user } = opts;
+  const ids = Array.isArray(glossaryIds) && glossaryIds.length > 0
+    ? glossaryIds
+    : ["default"];
   const uuid = uuidv4();
   let fullTranslation = "";
 
   try {
-    // 步骤 1：抽术语
-    const termsResult = await extractTerms(message);
+    // 步骤 1：抽术语（按 ids 融合多词库，靠后覆盖靠前）
+    const termsResult = await extractTerms(message, ids);
 
     // 步骤 2：RAGFlow 检索
     const datasetId = process.env.RAGFLOW_DATASET_ID || "";
@@ -74,16 +77,20 @@ async function workspaceChatAdapter(response, opts) {
     });
 
     // 元信息（消息完成后附加到 metrics，前端通过 metrics.translationMeta 读取）
-    // glossaryName 优先取 listGlossaries 返回的 name；fallback 到 glossaryId
-    // all_terms：所有主词条 zh 列表（前端高亮 chunks 用，避免只看 message 命中）
+    // glossaryIds：实际请求的 ids
+    // glossaryNames：按 ids 顺序从 listGlossaries 查 name，未找到的用 id 兜底
+    // glossaryUsed：Python wrapper 实际生效的 ids（找不到的 jsonl 会被跳过）
     const glossaries = listGlossaries();
-    const matchedGlossary = (glossaries || []).find((g) => g.id === glossaryId);
+    const usedIds = Array.isArray(termsResult.glossary_used)
+      ? termsResult.glossary_used
+      : ids;
+    const glossaryNames = usedIds.map((gid) => {
+      const matched = (glossaries || []).find((g) => g.id === gid);
+      return matched?.name || gid;
+    });
     const translationMeta = {
-      glossaryId,
-      glossaryName:
-        (matchedGlossary && matchedGlossary.name) ||
-        termsResult.glossary_name ||
-        glossaryId,
+      glossaryIds: usedIds,
+      glossaryNames,
       hitCount: termsResult.hits?.length || 0,
       retrievalCount: chunks?.length || 0,
       terms: termsResult.hits || [],

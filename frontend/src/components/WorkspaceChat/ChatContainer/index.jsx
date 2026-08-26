@@ -26,7 +26,7 @@ import { MetricsProvider } from "./ChatHistory/HistoricalMessage/Actions/RenderM
 export default function ChatContainer({
   workspace,
   knownHistory = [],
-  glossaryId = null,
+  glossaryIds = null,
   glossarySelector = null,
 }) {
   const { threadSlug = null } = useParams();
@@ -225,7 +225,7 @@ export default function ChatContainer({
             setSocketId
           ),
         attachments,
-        extraBody: glossaryId ? { glossaryId } : {},
+        extraBody: glossaryIds ? { glossaryIds } : {},
       });
       return;
     }

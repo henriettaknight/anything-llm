@@ -19,7 +19,7 @@ export default function WorkspaceChat({ loading, workspace }) {
   const { threadSlug = null } = useParams();
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
-  const [glossaryId, setGlossaryId] = useState(null);
+  const [glossaryIds, setGlossaryIds] = useState(null);
 
   useEffect(() => {
     async function getHistory() {
@@ -87,10 +87,10 @@ export default function WorkspaceChat({ loading, workspace }) {
         <ChatContainer
           workspace={workspace}
           knownHistory={history}
-          glossaryId={showGlossary ? glossaryId : null}
+          glossaryIds={showGlossary ? glossaryIds : null}
           glossarySelector={
             showGlossary ? (
-              <GlossarySelector value={glossaryId} onChange={setGlossaryId} />
+              <GlossarySelector value={glossaryIds || []} onChange={setGlossaryIds} />
             ) : null
           }
         />

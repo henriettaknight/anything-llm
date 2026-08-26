@@ -295,7 +295,16 @@ function TranslationMetaBar({ metrics = {} }) {
   const meta = metrics?.translationMeta;
   if (!meta) return null;
 
-  const glossaryName = meta.glossaryName || meta.glossaryId || "-";
+  // 兼容旧格式（glossaryName/glossaryId 单值）和新格式（glossaryNames/glossaryIds 数组）
+  const glossaryNames = (() => {
+    if (Array.isArray(meta.glossaryNames) && meta.glossaryNames.length > 0) {
+      return meta.glossaryNames.join("、");
+    }
+    if (Array.isArray(meta.glossaryIds) && meta.glossaryIds.length > 0) {
+      return meta.glossaryIds.join("、");
+    }
+    return meta.glossaryName || meta.glossaryId || "-";
+  })();
   const hitCount = meta.hitCount ?? 0;
   const retrievalCount = meta.retrievalCount ?? 0;
   const terms = Array.isArray(meta.terms) ? meta.terms : [];
@@ -315,7 +324,7 @@ function TranslationMetaBar({ metrics = {} }) {
       <div className="ml-14 mt-2 px-3 py-2 rounded-md bg-theme-bg-chat-input border border-theme-border text-xs text-theme-text-secondary flex flex-wrap items-center gap-x-4 gap-y-1">
         <span>
           术语库：
-          <span className="text-theme-text-primary">{glossaryName}</span>
+          <span className="text-theme-text-primary">{glossaryNames}</span>
         </span>
         <button
           type="button"

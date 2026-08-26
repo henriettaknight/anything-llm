@@ -29,7 +29,7 @@ function chatEndpoints(app) {
     async (request, response) => {
       try {
         const user = await userFromSession(request, response);
-        const { message, attachments = [], feature, glossaryId } = reqBody(request);
+        const { message, attachments = [], feature, glossaryIds } = reqBody(request);
         const workspace = response.locals.workspace;
 
         if (!message?.length) {
@@ -67,7 +67,7 @@ function chatEndpoints(app) {
           await workspaceChatAdapter(response, {
             workspace,
             message,
-            glossaryId,
+            glossaryIds,
             thread: null,
             user,
           });
@@ -146,7 +146,7 @@ function chatEndpoints(app) {
     async (request, response) => {
       try {
         const user = await userFromSession(request, response);
-        const { message, attachments = [], feature, glossaryId } = reqBody(request);
+        const { message, attachments = [], feature, glossaryIds } = reqBody(request);
         const workspace = response.locals.workspace;
         const thread = response.locals.thread;
 
@@ -185,7 +185,7 @@ function chatEndpoints(app) {
           await workspaceChatAdapter(response, {
             workspace,
             message,
-            glossaryId,
+            glossaryIds,
             thread,
             user,
           });

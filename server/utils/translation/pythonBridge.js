@@ -24,22 +24,31 @@ const PYTHON_BIN = process.env.TRANSLATION_PYTHON_BIN || "python3";
 /**
  * 抽取术语
  * @param {string} sourceText 待译中文原文
- * @returns {Promise<{glossary: string, term_total: number, mandatory_count: number, preferred_count: number, hits: Array<{zh: string, en: string, lv: string, forbidden: string[]}>}>}
+ * @param {string[]} [glossaryIds=["default"]] 词库 id 数组，靠后覆盖靠前
+ * @returns {Promise<{glossary: string, term_total: number, mandatory_count: number, preferred_count: number, hits: Array<{zh: string, en: string, lv: string, forbidden: string[]}>, all_terms: string[], glossary_used: string[]}>}
  */
-function extractTerms(sourceText) {
+function extractTerms(sourceText, glossaryIds = ["default"]) {
   const empty = {
     glossary: "",
     term_total: 0,
     mandatory_count: 0,
     preferred_count: 0,
     hits: [],
+    all_terms: [],
+    glossary_used: [],
   };
 
   if (!sourceText || !sourceText.trim()) {
     return Promise.resolve(empty);
   }
 
-  const payload = JSON.stringify({ source_text: sourceText });
+  const ids = Array.isArray(glossaryIds) && glossaryIds.length > 0
+    ? glossaryIds
+    : ["default"];
+  const payload = JSON.stringify({
+    source_text: sourceText,
+    glossary_ids: ids,
+  });
 
   return new Promise((resolve) => {
     const child = spawn(PYTHON_BIN, [WRAPPER_PATH], {
