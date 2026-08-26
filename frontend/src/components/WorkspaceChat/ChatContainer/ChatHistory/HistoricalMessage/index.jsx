@@ -1,5 +1,7 @@
-import React, { memo } from "react";
-import { Info, Warning } from "@phosphor-icons/react";
+import React, { memo, useEffect, useRef, useState } from "react";
+import ReactDOM from "react-dom";
+import { Info, Warning, Check, Copy, X } from "@phosphor-icons/react";
+import useCopyText from "@/hooks/useCopyText";
 import UserIcon from "../../../../UserIcon";
 import Actions from "./Actions";
 import renderMarkdown from "@/utils/chat/markdown";
@@ -152,6 +154,9 @@ const HistoricalMessage = ({
             alignmentCls={alignmentCls}
           />
         </div>
+        {role === "assistant" && (
+          <TranslationMetaBar metrics={metrics} />
+        )}
         {role === "assistant" && <Citations sources={sources} />}
       </div>
     </div>
@@ -187,11 +192,14 @@ export default memo(
   // if the content is the exact same AND (not streaming)
   // the lastMessage status is the same (regen icon)
   // and the chatID matches between renders. (feedback icons)
+  // metrics 也需参与比较：finalizeResponseStream 时 metrics.translationMeta 才到位，
+  // 否则元信息条不会从空 → 有内容刷新出来。
   (prevProps, nextProps) => {
     return (
       prevProps.message === nextProps.message &&
       prevProps.isLastMessage === nextProps.isLastMessage &&
-      prevProps.chatId === nextProps.chatId
+      prevProps.chatId === nextProps.chatId &&
+      prevProps.metrics === nextProps.metrics
     );
   }
 );
@@ -270,3 +278,263 @@ const RenderChatContent = memo(
     );
   }
 );
+
+/**
+ * 翻译元信息条：在 assistant 消息下方展示术语库、命中数、检索数。
+ * 仅在 metrics.translationMeta 存在时渲染（翻译 workspace 才有）。
+ * 普通对话 metrics 为空对象，不渲染。
+ *
+ * 交互（按用户最新需求）：
+ *   - 悬浮在"命中术语 N 条"上 → 右侧固定面板打开，并切到"命中"tab
+ *   - 悬浮在"检索片段 N 段"上 → 右侧固定面板打开，并切到"检索"tab
+ *   - 面板显示后需手动点关闭按钮才关闭（不随鼠标离开关闭）
+ *   - 面板右上角：复制按钮 + 关闭按钮
+ *   - 面板内有两个 tab：命中 / 检索
+ */
+function TranslationMetaBar({ metrics = {} }) {
+  const meta = metrics?.translationMeta;
+  if (!meta) return null;
+
+  const glossaryName = meta.glossaryName || meta.glossaryId || "-";
+  const hitCount = meta.hitCount ?? 0;
+  const retrievalCount = meta.retrievalCount ?? 0;
+  const terms = Array.isArray(meta.terms) ? meta.terms : [];
+  const chunks = Array.isArray(meta.chunks) ? meta.chunks : [];
+  const allTerms = Array.isArray(meta.allTerms) ? meta.allTerms : [];
+
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("hits"); // 'hits' | 'chunks'
+
+  const openPanel = (tab) => {
+    setActiveTab(tab);
+    setPanelOpen(true);
+  };
+
+  return (
+    <>
+      <div className="ml-14 mt-2 px-3 py-2 rounded-md bg-theme-bg-chat-input border border-theme-border text-xs text-theme-text-secondary flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span>
+          术语库：
+          <span className="text-theme-text-primary">{glossaryName}</span>
+        </span>
+        <button
+          type="button"
+          onMouseEnter={() => openPanel("hits")}
+          onClick={() => openPanel("hits")}
+          className="underline decoration-dotted underline-offset-2 hover:text-theme-text-primary"
+        >
+          命中术语：<span className="text-theme-text-primary">{hitCount}</span> 条
+        </button>
+        <button
+          type="button"
+          onMouseEnter={() => openPanel("chunks")}
+          onClick={() => openPanel("chunks")}
+          className="underline decoration-dotted underline-offset-2 hover:text-theme-text-primary"
+        >
+          检索片段：<span className="text-theme-text-primary">{retrievalCount}</span> 段
+        </button>
+      </div>
+
+      {panelOpen && (
+        <TranslationMetaPanel
+          terms={terms}
+          chunks={chunks}
+          hitCount={hitCount}
+          retrievalCount={retrievalCount}
+          allTerms={allTerms}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onClose={() => setPanelOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * 右侧固定面板：通过 React Portal 渲染到 body，绝对定位右侧。
+ * 不随鼠标离开关闭，必须点关闭按钮。
+ */
+function TranslationMetaPanel({
+  terms,
+  chunks,
+  hitCount,
+  retrievalCount,
+  allTerms,
+  activeTab,
+  setActiveTab,
+  onClose,
+}) {
+  const termsText = terms
+    .map((t) => `${t.zh || ""} → ${t.en || ""}`)
+    .filter((line) => line.trim() !== "→")
+    .join("\n");
+  const chunksText = chunks
+    .map((c, i) => `[片段${i + 1}]\n${c.content || ""}`)
+    .join("\n\n");
+
+  const isHits = activeTab === "hits";
+  const copyContent = isHits ? termsText : chunksText;
+  const copyEmpty = isHits ? terms.length === 0 : chunks.length === 0;
+
+  return ReactDOM.createPortal(
+    <div
+      className="fixed top-0 right-0 bottom-0 z-[1000] w-[420px] max-w-[90vw] bg-theme-bg-secondary border-l border-theme-border shadow-2xl flex flex-col"
+      role="dialog"
+      aria-label="翻译元信息"
+    >
+      {/* 头部：tab + 复制 + 关闭 */}
+      <div className="flex items-center justify-between border-b border-theme-border px-3 py-2">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("hits")}
+            className={`px-3 py-1 text-xs rounded-md border ${
+              isHits
+                ? "bg-theme-action-bg text-white border-theme-action-bg"
+                : "bg-transparent text-theme-text-secondary border-theme-border hover:text-theme-text-primary"
+            }`}
+          >
+            命中（{hitCount}）
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("chunks")}
+            className={`px-3 py-1 text-xs rounded-md border ${
+              !isHits
+                ? "bg-theme-action-bg text-white border-theme-action-bg"
+                : "bg-transparent text-theme-text-secondary border-theme-border hover:text-theme-text-primary"
+            }`}
+          >
+            检索（{retrievalCount}）
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <CopyButton text={copyContent} disabled={copyEmpty} />
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-theme-text-secondary hover:text-theme-text-primary p-1"
+            aria-label="关闭"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* 内容区 */}
+      <div className="flex-1 overflow-y-auto p-3 text-xs">
+        {isHits ? (
+          terms.length === 0 ? (
+            <div className="text-theme-text-secondary">未命中术语</div>
+          ) : (
+            <ul className="space-y-2">
+              {terms.map((t, i) => (
+                <li
+                  key={i}
+                  className="flex gap-2 items-center px-2 py-1 rounded hover:bg-theme-bg-chat-input"
+                >
+                  <span className="text-theme-text-primary">{t.zh}</span>
+                  <span className="text-theme-text-secondary">→</span>
+                  <span className="text-theme-text-primary">{t.en}</span>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : chunks.length === 0 ? (
+          <div className="text-theme-text-secondary">未检索到片段</div>
+        ) : (
+          <div className="space-y-3">
+            {chunks.map((c, i) => (
+              <div key={i} className="border border-theme-border rounded p-2">
+                <div className="text-theme-text-secondary mb-1">
+                  片段 {i + 1}
+                </div>
+                <div className="text-theme-text-primary whitespace-pre-wrap break-words">
+                  <ChunkHighlight text={c.content} terms={allTerms} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/**
+ * 按 chunk 结构化字段渲染：只对 "- 中文词条:" 行里的值做术语高亮，
+ * 其他字段行（英文译法、可接受变体、禁用译法、适用范围、类别、说明等）
+ * 原样输出，避免把"适用范围: 修仙"里的"修仙"误标红。
+ */
+function ChunkHighlight({ text, terms = [] }) {
+  if (!text) return null;
+
+  const termSet = [
+    ...new Set(
+      (terms || [])
+        .map((t) => (typeof t === "string" ? t : t?.zh))
+        .filter(Boolean)
+    ),
+  ];
+  // 按长度降序，避免短词先匹配破坏长词
+  termSet.sort((a, b) => b.length - a.length);
+
+  const lines = text.split(/\r?\n/);
+  return (
+    <>
+      {lines.map((line, i) => {
+        const m = line.match(/^- \s*中文词条\s*:\s*(.*)$/);
+        if (m && termSet.length > 0) {
+          const value = m[1];
+          const escaped = termSet.map((t) =>
+            t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          );
+          const regex = new RegExp(`(${escaped.join("|")})`, "g");
+          const parts = value.split(regex).filter((p) => p !== "");
+          return (
+            <div key={i}>
+              <span className="text-theme-text-secondary">- 中文词条: </span>
+              {parts.map((part, j) =>
+                termSet.includes(part) ? (
+                  <span
+                    key={j}
+                    className="text-red-500 font-semibold bg-red-50 dark:bg-red-900/30 px-0.5 rounded"
+                  >
+                    {part}
+                  </span>
+                ) : (
+                  <span key={j} className="text-theme-text-primary">
+                    {part}
+                  </span>
+                )
+              )}
+            </div>
+          );
+        }
+        return (
+          <div key={i} className="text-theme-text-primary">
+            {line}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function CopyButton({ text, disabled }) {
+  const { copied, copyText } = useCopyText();
+  return (
+    <button
+      type="button"
+      onClick={() => copyText(text)}
+      disabled={disabled}
+      className="text-theme-text-secondary hover:text-theme-text-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 text-xs"
+      aria-label="复制"
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+      <span>{copied ? "已复制" : "复制"}</span>
+    </button>
+  );
+}

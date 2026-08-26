@@ -3,7 +3,7 @@
 RAGFlow Code 组件 —— 术语抽取与提示词注入
 =========================================
 由 gen_code_component.py 从 glossary_unified_v1.jsonl 自动生成，请勿手工编辑本文件。
-生成时间：2026-08-05 01:08    术语库版本：v1.1    内联词条：968 条（mandatory 209 / preferred 759）
+生成时间：2026-08-25 00:27    术语库版本：v1.1    内联词条：961 条（mandatory 204 / preferred 757）
 
 【RAGFlow 配置步骤】
   1. Agent 画布上添加 Code 组件，语言选 Python
@@ -54,11 +54,11 @@ _GLOSSARY = """\
 三界;;Three Realms (Desire, Form, Formless);;p;;;;
 三足金乌;;Three-legged Golden Crow;;p;;;;
 上古;;Ancient Era;;p;;;;
-上品法器;;High-Grade Magical Artifact;;p;;;;
-上品灵器;;High-Grade Spiritual Artifact;;p;;;;
-上清;;Supreme Pure (灵宝天尊);;p;;;;
-下品法器;;Low-Grade Magical Artifact;;p;;;;
-下品灵器;;Low-Grade Spiritual Artifact;;p;;;;
+上品法器;;High-grade Faqi;;p;;;;
+上品灵器;;High-grade Lingqi;;p;;;;
+上清;;Supreme Pure;;p;;灵宝天尊;;
+下品法器;;Low-grade Faqi;;p;;;;
+下品灵器;;Low-grade Lingqi;;p;;;;
 不周山;;Mount Buzhou (Broken Pillar);;p;;;;
 不死长生功;;Undying Live Forever Technique;;p;;;;
 业力;;Karmic Burden;;p;;;;
@@ -75,13 +75,13 @@ _GLOSSARY = """\
 中期;;Intermediate Stage;;m;;;;
 中洲;;Midland;;m;;;;
 丹塔;;Alchemy Tower;;p;;;;
-丹师;;Alchemist;;p;;;;
-丹方;;Pill Recipe;;p;;;;
+丹师;;Elixir Master;;p;;;;
+丹方;;Elixir recipe;;p;;;;
 丹火;;Core Flame;;m;;;;
 丹田;;Dantian;;p;;;;
-丹药;;Elixir 或 Pill;;p;;;;
+丹药;;Elixir;;p;;;;
 主脉;;Main;;m;;支脉子弟;;
-乌酸木;;Black-Sour Wood;;m;;;;
+乌酸木;;Ebonsour;;m;;;;
 乘黄;;Chenghuang (Longevity Beast);;p;;;;
 九华山;;Mount Jiuhua (Ksitigarbha’s Abode);;p;;;;
 九天息壤;;Nine Heavens Breath Soil;;p;;;;
@@ -148,7 +148,7 @@ _GLOSSARY = """\
 仿制灵宝;;Imitation Spiritual Treasure;;p;;;;
 伏背;;Lurkback (one of the "Five Sages", Great Scorpion);;m;;;;
 会心;;Crit;;m;;;;
-会心抗性;;Crit Resist;;m;;;;
+会心抗性;;Crit Resist;;m;;暴击抵抗;;
 传承;;Inheritance;;p;;衣钵;;
 传送阵;;Teleportation Formation;;p;;;;
 伤害延迟;;Damage Delay;;m;;;;
@@ -194,7 +194,7 @@ _GLOSSARY = """\
 养精丹;;Nourishing Essence Pill;;p;;;;
 养魂丹;;Soul Nourishing Pill;;p;;;;
 内丹术;;Internal Alchemy;;p;;;;
-内门;;Inner;;m;;外门弟子;;
+内门弟子;;Inner Disciple;;m;;;;
 冉遗鱼;;Ranyi Fish (Six-Legged Fish);;p;;;;
 冰凤;;Ice Phoenix;;p;;;;
 冰封万里;;Ice Seal Ten Thousand Miles;;p;;;;
@@ -209,8 +209,7 @@ _GLOSSARY = """\
 凝气散;;Qi Condensation Powder;;p;;;;
 凝气期;;Qi Condensation Stage;;p;;;;
 凡人修仙传;;A Record of a Mortal's Journey to Immortality;;p;;;;
-凡人界;;Mortal Realm;;m;;;;
-凡尘;;Mortal Realm;;m;;凡间|人界;;
+凡尘;;Mortal Realm;;m;;凡间|人界|凡人界;;
 凤凰;;Fenghuang (Chinese Phoenix);;p;;;;
 凤栖木;;Phoenix Perching Wood;;p;;;;
 分水刺;;Water Splitting Dagger;;p;;;;
@@ -251,25 +250,22 @@ _GLOSSARY = """\
 反震;;Rebound;;m;;;;
 古修士洞府;;Ancient Cultivator Cave;;p;;;;
 古修士遗址;;Ancient Cultivator Ruins;;p;;;;
-古宝;;Ancient Treasure;;p;;;;
-合体期;;Body Integration Stage;;p;;;;
+古宝;;Ancient Fabao;;p;;;;
+合体期;;Conjointment Stage;;p;;;;
 合道境;;Dao Union Realm;;p;;;;
 后天境;;Acquired Realm;;p;;;;
 后期;;Late Stage;;m;;;;
 吞天魔功;;Heaven Devouring Demon Art;;p;;;;
 吞天鼠;;Heaven Devouring Rat;;p;;;;
 员峤;;Yuanjiao (Floating Mountain);;p;;;;
-周天星斗大阵;;Cosmic Starry Sky Formation;;p;;;;
-周天星斗阵;;Cosmic Star Formation;;p;;;;
+周天星斗阵;;Cosmic Star Formation;;p;;周天星辰大阵;;
 周天星辰图;;Cosmic Star Map;;p;;;;
-周天星辰大阵;;Cosmic Star Formation;;p;;;;
 呼风唤雨;;Summon Wind and Rain;;p;;;;
 命格;;Destiny Grid;;p;;;;
 命灯;;Life Lantern;;p;;;;
 命牌;;Life Token;;p;;;;
 命门;;Gate of Life;;p;;;;
 命魂灯;;Life Soul Lamp;;p;;;;
-咏唱速度;;Cast Speed;;m;;;;
 咸滩;;Brine Shores;;p;;;;
 善恶;;Morality;;m;;;;
 噬金虫;;Gold Devouring Beetle;;p;;;;
@@ -304,13 +300,13 @@ _GLOSSARY = """\
 墨河;;River Ink;;m;;;;
 墨河村;;Inkwater Village;;m;;;;
 墨碑台地;;Ink-Stele Plateau;;m;;;;
-墨道;;Ink Academy;;m;;;;
+墨道学宫;;Ink Academy;;m;;;;
 外丹术;;External Alchemy;;p;;;;
 夙兴;;Dawn-Rise;;m;;;;
-大乘期;;Great Ascension Stage;;p;;;;
+大乘期;;Grand Completion Stage;;p;;;;
 大圆满;;Accomplished Stage;;m;;;;
 大成;;Great Completion;;p;;;;
-大泽菜;;Great Marsh Herb;;m;;;;
+大泽菜;;Swamp Green;;m;;;;
 大罗境;;Great Luo Realm;;p;;;;
 大荒囚天指;;Great Desolate Heaven Shackling Finger;;p;;;;
 大衍决;;Great Derivation Art;;p;;;;
@@ -332,7 +328,7 @@ _GLOSSARY = """\
 天机;;Heavenly Mystery;;p;;;;
 天机罗盘;;Heavenly Mechanism Compass;;p;;;;
 天机迷宫;;Heavenly Mechanism Labyrinth;;p;;;;
-天材地宝;;Heavenly Materials and Earthly Treasures;;p;;;;
+天材地宝;;resources and materials;;p;;;;
 天渊城;;Heavenly Abyss City;;p;;;;
 天渊战场;;Heavenly Abyss Battlefield;;p;;;;
 天火焚城;;Celestial Fire City Burning;;p;;;;
@@ -351,7 +347,7 @@ _GLOSSARY = """\
 天道;;Deva Realm;;p;;;;
 天道无情;;Heavenly Dao is Merciless;;p;;;;
 天道酬勤;;Heavenly Dao Rewards the Diligent;;p;;;;
-天门百合;;Empyrean Pass Lily;;m;;天门百;;
+天门百合;;Empyrean Lily;;m;;;;
 天门道;;Empyrean Pass;;m;;;;
 天雷符;;Heavenly Thunder Talisman;;p;;;;
 天青花;;Heavenly Azure Flower;;p;;;;
@@ -370,7 +366,7 @@ _GLOSSARY = """\
 太初禁地;;Primordial Forbidden Zone;;p;;;;
 太古;;Primordial Era;;m;;;;
 太极;;Taiji (Supreme Ultimate);;p;;;;
-太清;;Grand Pure (道德天尊);;p;;;;
+太清;;Grand Pure;;p;;道德天尊;;
 太清玉液;;Supreme Clarity Jade Elixir;;p;;;;
 太虚剑意;;Void Sword Intent;;p;;;;
 太虚幻境;;Illusory Realm of Taixu;;p;;;;
@@ -380,7 +376,7 @@ _GLOSSARY = """\
 太阴圣体;;Lunar Holy Body;;p;;;;
 太阴寒玉;;Lunar Cold Jade;;p;;;;
 太阴玄冰;;Lunar Profound Ice;;p;;;;
-夺舍;;Body Snatching;;m;;;;
+夺舍;;Possession;;m;;;;
 夺魂摄魄;;Soul Stealing;;p;;;;
 奇门遁甲;;Qimen Dunjia (Mystic Gate Escaping);;p;;;;
 妖丹;;Demon Core;;m;;;;
@@ -394,12 +390,12 @@ _GLOSSARY = """\
 宗门;;Sect;;m;;;;
 定海神针;;Ocean Stabilizing Divine Needle;;p;;;;
 定颜丹;;Appearance Fixing Pill;;p;;;;
-宝塔;;Pagoda Treasure;;p;;;;
+宝塔;;Pagoda;;p;;;;
 家族;;Family;;m;;世家;;
 寂灭期;;Nirvana Extinction Stage;;p;;;;
 寒铁;;Cold Iron;;p;;;;
 寿元;;Lifespan;;m;;;;
-寿脉;;Leyline;;m;;;;
+外门弟子;;Outer Disciple;;m;;;;
 尸解;;Corpse Liberation;;p;;;;
 山河社稷图;;Mountains and Rivers Map;;p;;;;
 山门;;Mountain Gate;;p;;;;
@@ -456,13 +452,13 @@ _GLOSSARY = """\
 拍卖会;;Auction;;p;;;;
 指法;;Finger Technique;;p;;;;
 掌法;;Palm Technique;;p;;;;
-掌门;;Sect Leader;;m;;;;
+掌门;;Grandmaster;;m;;;;
 摄魂铃;;Soul Capturing Bell;;p;;;;
 操控距离增加量;;Control Distance Increase;;m;;;;
 攻击力;;Attack;;m;;;;
-攻击法器;;Offensive Artifact;;p;;;;
+攻击法器;;Offensive Faqi;;p;;;;
 散仙;;Loose Immortal;;p;;;;
-散修;;Rogue Cultivator;;p;;;;
+散修;;independent cultivator;;p;;;;
 文昌帝君;;Wenchang Dijun (God of Literature);;p;;;;
 斋醮;;Taoist Ritual;;p;;;;
 斗姆元君;;Doumu Yuanjun (Mother of the Dipper);;p;;;;
@@ -472,10 +468,10 @@ _GLOSSARY = """\
 斩灵境;;Spirit Severing Realm;;p;;;;
 断魂山脉;;Soulrend Ranges;;p;;;;
 方丈山;;Fangzhang Mountain;;p;;;;
-方圆叶;;Square-Stem Round-Leaf;;m;;;;
+方圆叶;;Ridgecircle;;m;;;;
 施法消耗;;Spell Cost;;m;;;;
 施法消耗降低;;Cast Cost Reduction;;m;;;;
-施法速度;;Cast Speed;;m;;;;
+施法速度;;Cast Speed;;m;;咏唱速度;;
 族老;;Family Elder;;m;;;;
 族长;;Patriarch;;m;;;;
 无为而治;;Governance by Non-Action;;p;;;;
@@ -500,7 +496,6 @@ _GLOSSARY = """\
 普陀山;;Mount Putuo (Avalokiteshvara’s Abode);;p;;;;
 暗灵根;;Dark Spiritual Root;;p;;;;
 暮湖;;(Lava) Lake Twilight;;p;;;;
-暴击抵抗;;Crit Resist;;m;;;;
 暴击率;;Crit Rate;;m;;;;
 更始岛;;Newborn Isle;;p;;;;
 更始新脉;;The Newborn Leyline;;p;;;;
@@ -519,8 +514,8 @@ _GLOSSARY = """\
 杂役弟子;;Servant Disciple;;m;;;;
 杏叶葵;;Apricot-Leaf Mallow;;m;;;;
 极乐世界;;Pure Land (Sukhavati);;p;;;;
-极品法器;;Top-Grade Magical Artifact;;p;;;;
-极品灵器;;Top-Grade Spiritual Artifact;;p;;;;
+极品法器;;top-grade Faqi;;p;;;;
+极品灵器;;top-grade Lingqi;;p;;;;
 极西之地;;Far Western Lands;;p;;;;
 梼杌;;Taowu (Ignorance Beast);;p;;;;
 正道;;Righteous Dao;;p;;;;
@@ -528,21 +523,21 @@ _GLOSSARY = """\
 每击额外附加伤害;;Bonus Damage Per Hit;;m;;;;
 毕方;;Bifang (Fire Bird);;p;;;;
 气海;;Qi Sea;;p;;;;
-气血;;Qi and Blood;;m;;;;
-气运;;Destiny Energy;;p;;;;
+气血;;Health;;m;;;;
+气运;;Luck;;p;;;;
 水灵根;;Water Spiritual Root;;p;;;;
 沧原;;Aeonic Fields;;m;;;;
 沧原-大漠;;Aeonic Deserts;;p;;;;
-法体双修;;Body and Magic Dual Cultivation;;p;;;;
-法修;;Technique Cultivator;;m;;;;
+法体双修;;Body and Qi Cultivation;;p;;;;
+法修;;Qi Cultivation;;m;;;;
 法兵;;Fabing;;m;;;;
-法力;;Magical Power;;p;;;;
-法力反噬;;Mana Backlash;;p;;;;
-法力屏障;;Mana Barrier;;p;;;;
+法力;;Qi;;p;;;;
+法力反噬;;Qi Backlash;;p;;;;
+法力屏障;;Qi Barrier;;p;;;;
 法力恢复效果提升;;Energy Regen Increase;;m;;;;
 法器;;Faqi;;m;;;;
 法天象地;;Magic Manifestation Giant Form;;p;;;;
-法宝;;Magical Treasure;;p;;;;
+法宝;;Fabao;;p;;;;
 法宝增幅;;Fabao Amplification;;m;;;;
 法旨;;Divine Decree;;p;;;;
 法术伤害加成;;Spell Damage Bonus;;m;;;;
@@ -552,8 +547,8 @@ _GLOSSARY = """\
 波罗蜜;;Paramita (Perfection);;p;;;;
 泥丸宫;;Niwan Palace;;p;;;;
 洗髓丹;;Marrow Cleansing Pill;;p;;;;
-洞天;;Cave Heaven;;m;;;;
-洞天福地;;Grotto-Heavens and Blissful Lands;;p;;;;
+洞天;;Veilland;;m;;;;
+洞天福地;;Veillands and Sanctums;;p;;;;
 洞府;;Cave Abode;;p;;;;
 流离孤脉;;The Exiled Leyline;;p;;;;
 济水;;River Grace;;p;;;;
@@ -587,24 +582,24 @@ _GLOSSARY = """\
 灵兽;;Spiritual Beast;;m;;;;
 灵兽园;;Spiritual Beast Garden;;p;;;;
 灵兽袋;;Spirit Beast Pouch;;p;;;;
-灵力;;Spiritual Power;;m;;;;
-灵力恢复速度;;Energy Regen;;m;;;;
-灵力枯竭;;Spiritual Energy Depletion;;p;;;;
+灵力;;Qi;;m;;;;
+灵力恢复速度;;Qi Regen;;m;;;;
+灵力枯竭;;Qi Depletion;;p;;;;
 灵动期;;Spirit Awakening Stage;;p;;;;
 灵压;;Spiritual Pressure;;p;;;;
 灵台;;Spirit Platform;;p;;;;
-灵器;;Spiritual Artifact;;m;;;;
+灵器;;Lingqi;;m;;;;
 灵契;;Spirit Contract;;p;;;;
 灵宠;;Spiritual Pet;;p;;;;
 灵山;;Vulture Peak (Spiritual Mountain);;p;;;;
 灵根;;Spiritual Root;;m;;;;
-灵根属性;;Spiritual Root Attribute;;p;;;;
+灵根属性;;Spiritual Root Element;;p;;;;
 灵根资质;;Spiritual Root Aptitude;;p;;;;
 灵植;;spiritual plant;;m;;;;
 灵气;;Spiritual Energy;;m;;;;
 灵泉;;Spiritual Spring;;p;;;;
 灵活度;;Maneuverability;;m;;;;
-灵田;;Spiritual Field;;p;;;;
+灵田;;spiritual farm;;p;;;;
 灵界;;Spirit Realm;;m;;;;
 灵眼;;spiritual eye;;m;;;;
 灵眼之树;;Spirit Eye Tree;;p;;;;
@@ -616,17 +611,17 @@ _GLOSSARY = """\
 灵脉;;Spirit Vein;;m;;;;
 灵脉符;;Spirit Vein Detection Talisman;;p;;;;
 灵脉节点;;Spirit Vein Node;;p;;;;
-灵芝;;Spiritual Mushroom;;p;;;;
+灵芝;;lingzhi;;p;;;;
 灵草;;Spiritual Herb;;p;;;;
 点化;;Enlightenment Bestowal;;p;;;;
 点石成金;;Stone to Gold Transmutation;;p;;;;
-炼丹;;Alchemy;;m;;;;
-炼丹房;;Alchemy Room;;p;;;;
-炼丹炉;;Alchemy Furnace;;p;;;;
-炼丹阵;;Alchemy Formation;;p;;;;
-炼器;;Artifact Refining;;m;;;;
-炼器室;;Artifact Refining Room;;p;;;;
-炼器阵;;Artifact Refining Formation;;p;;;;
+炼丹;;Elixir-refining;;m;;;;
+炼丹房;;Elixir Chamber;;p;;;;
+炼丹炉;;Elixir Furnace;;p;;;;
+炼丹阵;;Elixir-refining Formation;;p;;;;
+炼器;;Fabao-crafting;;m;;;;
+炼器室;;Fabao-crafting Chamber;;p;;;;
+炼器阵;;Fabao-crafting Formation;;p;;;;
 炼气;;Qi Refinement;;m;;;;
 炼气一层;;Qi Refinement Layer 1;;p;;;;
 炼气大成;;Major Completion of Qi Refinement;;m;;;;
@@ -646,8 +641,7 @@ _GLOSSARY = """\
 爝火余脉;;Juehuo, Leyline of Embers;;p;;;;
 牛头草;;Bull's-Head Grass;;m;;;;
 物理伤害加成;;Physical Damage Bonus;;m;;;;
-物理伤害抗性;;Physical Damage Resist;;m;;;;
-物理伤害抵抗;;Physical Damage Resist;;m;;;;
+物理伤害抗性;;Physical Damage Resist;;m;;物理伤害抵抗;;
 獬豸;;Xiezhì (Justice Beast);;p;;;;
 玄仙境;;Mystic Immortal Realm;;p;;;;
 玄冥神掌;;Profound Darkness Divine Palm;;p;;;;
@@ -675,7 +669,7 @@ _GLOSSARY = """\
 玄黄鼎;;Primordial Yellow Cauldron;;p;;;;
 玄龟;;Profound Turtle;;p;;;;
 玉京;;Jadecrawl (one of the "Five Sages", Great Serpent);;m;;;;
-玉清;;Jade Pure (元始天尊);;p;;;;
+玉清;;Jade Pure;;p;;元始天尊;;
 玉皇大帝;;Jade Emperor;;p;;;;
 王母娘娘;;Queen Mother of the West;;p;;;;
 琅嬛福地;;Langhuan Blissful Land;;p;;;;
@@ -716,7 +710,7 @@ _GLOSSARY = """\
 神念烙印;;Divine Will Imprint;;p;;;;
 神行百变;;Hundred Transformations Movement;;p;;;;
 神行符;;Swift Movement Talisman;;p;;;;
-神识;;Divine Sense;;m;;;;
+神识;;Spirit Sense;;m;;;;
 神识伤害强度;;Spirit Sense Damage Strength;;m;;;;
 神识伤害抵抗强度;;Spirit Sense Resist Strength;;m;;;;
 神识占用量;;Spirit Sense Reserve;;m;;;;
@@ -730,9 +724,9 @@ _GLOSSARY = """\
 神识能量恢复;;Spirit Sense Energy Regen;;m;;;;
 神识负载;;Spirit Sense Capacity;;m;;;;
 神足通;;Divine Foot Travel;;p;;;;
-神通;;Divine Ability;;m;;;;
+神通;;spell;;m;;;;
 神魂受损;;Divine Soul Damage;;p;;;;
-禁地;;Forbidden Land;;p;;;;
+禁地;;Forbidden Zone;;p;;;;
 禁空禁制;;Flight Prohibition Restriction;;p;;;;
 禅定;;Dhyana (Meditative Absorption);;p;;;;
 福地;;Sanctum;;m;;;;
@@ -794,8 +788,7 @@ _GLOSSARY = """\
 菩提心;;Bodhicitta (Awakening Mind);;p;;;;
 葬仙之地;;Immortal Burial Ground;;p;;;;
 葬仙陵;;Immortal Burial Mound;;p;;;;
-蓄势伤害;;Charge Bonus Damage;;m;;;;
-蓄势增伤;;Charge Bonus Damage;;m;;;;
+蓄势伤害;;Charge Bonus Damage;;m;;蓄势增伤;;
 蓬莱仙岛;;Penglai Immortal Island;;p;;;;
 蔓居;;Sprawling Thorn;;m;;;;
 藏经阁;;Scripture Pavilion;;p;;;;
@@ -911,7 +904,7 @@ _GLOSSARY = """\
 问道境;;Dao Inquiry Realm;;p;;;;
 问鼎期;;Heaven Seeking Stage;;p;;;;
 阎浮提;;Jambudvipa (Human Realm);;p;;;;
-防御法器;;Defensive Artifact;;p;;;;
+防御法器;;Defensive Faqi;;p;;;;
 阳和教;;Wakespring Order;;m;;;;
 阴气;;nether energy;;m;;;;
 阴阳;;Yin and Yang;;p;;;;
@@ -957,7 +950,7 @@ _GLOSSARY = """\
 首乌;;Polygonum Multiflorum;;p;;;;
 驭兽术;;Beast Taming Technique;;p;;;;
 驻颜丹;;Youth Preserving Pill;;p;;;;
-鬣羚;;Serow;;m;;;;Hyena
+鬣羚;;Serow;;m;;;;
 鬼修;;Ghost Cultivator;;p;;;;
 鬼气;;Ghost Energy;;p;;;;
 鬼骨葬地;;Wraith Boneyard;;p;;;;
@@ -968,8 +961,8 @@ _GLOSSARY = """\
 魂灯;;Soul Lamp;;p;;;;
 魂牌;;Soul Tablet;;p;;;;
 魅力;;Charisma;;m;;;;
-魔修;;Demonic Cultivator;;m;;;;
-魔气;;Demonic Energy;;m;;;;
+魔修;;Devil Cultivator;;m;;;;
+魔气;;Devil Energy;;m;;;;
 魔炎谷;;Demonic Flame Valley;;p;;;;
 魔种;;Demon Seed;;p;;;;
 魔道;;Devil Dao;;p;;;;
@@ -987,7 +980,7 @@ _GLOSSARY = """\
 龟息功;;Turtle Breathing Art;;p;;;;
 薛家;;Xue Family;;m;;;;
 崇岳诸脉;;Chongyue Leylines;;m;;;;
-天门山;;Mount Tianmen;;m;;;;
+天门山;;Mount Empyrean;;m;;;;
 霏雪城;;Flakefall City;;m;;;;
 尉迟家;;Yuchi Family;;m;;;;"""
 

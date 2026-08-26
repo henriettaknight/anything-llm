@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import Workspace from "@/models/workspace";
 import LoadingChat from "./LoadingChat";
 import ChatContainer from "./ChatContainer";
+import GlossarySelector from "./ChatContainer/GlossarySelector";
+import { isTranslationWorkspace } from "@/utils/translation/constants";
 import paths from "@/utils/paths";
 import ModalWrapper from "../ModalWrapper";
 import { useParams } from "react-router-dom";
@@ -17,6 +19,7 @@ export default function WorkspaceChat({ loading, workspace }) {
   const { threadSlug = null } = useParams();
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [glossaryId, setGlossaryId] = useState(null);
 
   useEffect(() => {
     async function getHistory() {
@@ -77,10 +80,20 @@ export default function WorkspaceChat({ loading, workspace }) {
   }
 
   setEventDelegatorForCodeSnippets();
+  const showGlossary = isTranslationWorkspace(workspace);
   return (
     <TTSProvider>
       <DnDFileUploaderProvider workspace={workspace} threadSlug={threadSlug}>
-        <ChatContainer workspace={workspace} knownHistory={history} />
+        <ChatContainer
+          workspace={workspace}
+          knownHistory={history}
+          glossaryId={showGlossary ? glossaryId : null}
+          glossarySelector={
+            showGlossary ? (
+              <GlossarySelector value={glossaryId} onChange={setGlossaryId} />
+            ) : null
+          }
+        />
       </DnDFileUploaderProvider>
     </TTSProvider>
   );

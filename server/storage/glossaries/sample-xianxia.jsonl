@@ -1,0 +1,12 @@
+{"src": "灵力", "tgt": "Spiritual Power", "type": "mandatory"}
+{"src": "金丹", "tgt": "Golden Core", "type": "mandatory"}
+{"src": "元婴", "tgt": "Nascent Soul", "type": "mandatory"}
+{"src": "渡劫", "tgt": "tribulation", "type": "mandatory"}
+{"src": "飞升", "tgt": "Ascension", "type": "mandatory"}
+{"src": "修仙", "tgt": "cultivation", "type": "mandatory"}
+{"src": "筑基", "tgt": "Foundation Establishment", "type": "mandatory"}
+{"src": "化神", "tgt": "Spirit Severing", "type": "mandatory"}
+{"src": "炼气", "tgt": "Qi Condensation", "type": "mandatory"}
+{"src": "宗门", "tgt": "sect", "type": "preferred"}
+{"src": "道法", "tgt": "Daoist method", "type": "preferred"}
+{"src": "法宝", "tgt": "magic treasure", "type": "preferred"}

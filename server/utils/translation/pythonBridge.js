@@ -17,7 +17,9 @@ const WRAPPER_PATH = path.resolve(
   "extract_terms_wrapper.py"
 );
 
-const PYTHON_BIN = process.env.TRANSLATION_PYTHON_BIN || "python";
+// Dockerfile 装的是 python3-pip（只暴露 python3 命令），本地 dev 通常同时有 python/python3。
+// 默认 python3 兼容容器环境；如本机 python3 不存在，可通过 TRANSLATION_PYTHON_BIN 覆盖。
+const PYTHON_BIN = process.env.TRANSLATION_PYTHON_BIN || "python3";
 
 /**
  * 抽取术语

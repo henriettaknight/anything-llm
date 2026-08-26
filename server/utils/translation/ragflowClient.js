@@ -78,8 +78,7 @@ async function retrieval(question, datasetIds, topK = DEFAULT_TOP_K) {
 function formatChunksForPrompt(chunks) {
   if (!Array.isArray(chunks) || chunks.length === 0) return "";
   const lines = chunks.map(
-    (c, i) =>
-      `[片段${i + 1} score:${c.score.toFixed(2)} 来源:${c.source}]\n${c.content}`
+    (c, i) => `[片段${i + 1}]\n${c.content}`
   );
   return lines.join("\n\n");
 }

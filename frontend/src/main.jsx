@@ -335,16 +335,6 @@ const router = createBrowserRouter([
           return { element: <PrivateRoute Component={AutoDetection} /> };
         },
       },
-      // Smart Translation
-      {
-        path: "/translation",
-        lazy: async () => {
-          const { default: Translation } = await import(
-            "@/pages/Translation"
-          );
-          return { element: <PrivateRoute Component={Translation} hideUserMenu /> };
-        },
-      },
       // Experimental feature pages
       {
         path: "/settings/beta-features/live-document-sync/manage",

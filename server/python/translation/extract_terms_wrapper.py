@@ -59,12 +59,26 @@ def run(source_text: str) -> dict:
     # 拿拼好的 glossary 文本 + 计数（与 hits 共享 _AUTOMATON 缓存）
     base = _mod.main(text)
 
+    # 额外返回 all_terms：所有主词条 zh 列表（前端高亮 chunks 用）
+    all_terms = []
+    for line in _mod._GLOSSARY.split("\n"):
+        line = line.rstrip("\r")
+        if not line:
+            continue
+        parts = line.split(";;")
+        if len(parts) != 5:
+            continue
+        zh = parts[0]
+        if zh and zh not in all_terms:
+            all_terms.append(zh)
+
     return {
         "glossary": base["glossary"],
         "term_total": base["term_total"],
         "mandatory_count": base["mandatory_count"],
         "preferred_count": base["preferred_count"],
         "hits": hits,
+        "all_terms": all_terms,
     }
 
 

@@ -23,7 +23,12 @@ import SpeechRecognition, {
 import { ChatTooltips } from "./ChatTooltips";
 import { MetricsProvider } from "./ChatHistory/HistoricalMessage/Actions/RenderMetrics";
 
-export default function ChatContainer({ workspace, knownHistory = [] }) {
+export default function ChatContainer({
+  workspace,
+  knownHistory = [],
+  glossaryId = null,
+  glossarySelector = null,
+}) {
   const { threadSlug = null } = useParams();
   const [message, setMessage] = useState("");
   const [loadingResponse, setLoadingResponse] = useState(false);
@@ -220,6 +225,7 @@ export default function ChatContainer({ workspace, knownHistory = [] }) {
             setSocketId
           ),
         attachments,
+        extraBody: glossaryId ? { glossaryId } : {},
       });
       return;
     }
@@ -305,6 +311,11 @@ export default function ChatContainer({ workspace, knownHistory = [] }) {
       className="transition-all duration-500 relative md:ml-[2px] md:mr-[16px] md:my-[16px] md:rounded-[16px] bg-theme-bg-secondary w-full h-full overflow-y-scroll no-scroll z-[2]"
     >
       {isMobile && <SidebarMobileHeader />}
+      {glossarySelector && (
+        <div className="sticky top-0 z-30 px-[16px] py-[12px] md:pl-2 md:pr-2 bg-theme-bg-secondary border-b border-theme-border">
+          {glossarySelector}
+        </div>
+      )}
       <DnDFileUploaderWrapper>
         <MetricsProvider>
           <ChatHistory
