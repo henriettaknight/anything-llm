@@ -82,20 +82,22 @@ export default function WorkspaceChat({ loading, workspace }) {
   setEventDelegatorForCodeSnippets();
   const showGlossary = isTranslationWorkspace(workspace);
   return (
-    <TTSProvider>
-      <DnDFileUploaderProvider workspace={workspace} threadSlug={threadSlug}>
-        <ChatContainer
-          workspace={workspace}
-          knownHistory={history}
-          glossaryIds={showGlossary ? glossaryIds : null}
-          glossarySelector={
-            showGlossary ? (
-              <GlossarySelector value={glossaryIds || []} onChange={setGlossaryIds} />
-            ) : null
-          }
-        />
-      </DnDFileUploaderProvider>
-    </TTSProvider>
+    <div className="h-full w-full flex flex-col">
+      <TTSProvider>
+        <DnDFileUploaderProvider workspace={workspace} threadSlug={threadSlug}>
+          <ChatContainer
+            workspace={workspace}
+            knownHistory={history}
+            glossaryIds={showGlossary ? glossaryIds : null}
+            glossarySelector={
+              showGlossary ? (
+                <GlossarySelector value={glossaryIds || []} onChange={setGlossaryIds} />
+              ) : null
+            }
+          />
+        </DnDFileUploaderProvider>
+      </TTSProvider>
+    </div>
   );
 }
 

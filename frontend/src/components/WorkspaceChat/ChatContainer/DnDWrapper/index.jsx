@@ -418,7 +418,7 @@ export function DnDFileUploaderProvider({
   );
 }
 
-export default function DnDFileUploaderWrapper({ children }) {
+export default function DnDFileUploaderWrapper({ children, className = "" }) {
   const { onDrop, ready, dragging, setDragging } =
     useContext(DndUploaderContext);
   const { getRootProps, getInputProps } = useDropzone({
@@ -432,7 +432,7 @@ export default function DnDFileUploaderWrapper({ children }) {
 
   return (
     <div
-      className={`relative flex flex-col h-full w-full md:mt-0 mt-[40px] p-[1px]`}
+      className={`relative flex flex-col flex-1 min-h-0 w-full md:mt-0 mt-[40px] p-[1px] ${className}`}
       {...getRootProps()}
     >
       <div

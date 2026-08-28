@@ -307,16 +307,15 @@ export default function ChatContainer({
 
   return (
     <div
-      style={{ height: isMobile ? "100%" : "calc(100% - 32px)" }}
-      className="transition-all duration-500 relative md:ml-[2px] md:mr-[16px] md:my-[16px] md:rounded-[16px] bg-theme-bg-secondary w-full h-full overflow-y-scroll no-scroll z-[2]"
+      className="transition-all duration-500 relative md:ml-[2px] md:mr-[16px] md:mb-0 h-full w-full flex flex-col overflow-hidden no-scroll z-[2] bg-theme-bg-secondary"
     >
       {isMobile && <SidebarMobileHeader />}
       {glossarySelector && (
-        <div className="sticky top-0 z-30 px-[16px] py-[12px] md:pl-2 md:pr-2 bg-theme-bg-secondary border-b border-theme-border">
+        <div className="shrink-0 z-30 px-[16px] py-[12px] md:pl-2 md:pr-2 bg-theme-bg-secondary border-b border-theme-border">
           {glossarySelector}
         </div>
       )}
-      <DnDFileUploaderWrapper>
+      <DnDFileUploaderWrapper className="flex-1 min-h-0 flex flex-col">
         <MetricsProvider>
           <ChatHistory
             history={chatHistory}
