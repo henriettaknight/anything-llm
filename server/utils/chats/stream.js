@@ -70,7 +70,9 @@ async function streamChatWithWorkspace(
 
   const VectorDb = getVectorDbClass();
 
-  const messageLimit = workspace?.openAiHistory || 20;
+  // 用 ?? 而不是 ||：openAiHistory=0 是合法值（翻译这类纯单轮任务要禁用历史），
+  // 用 || 会被 falsy 短路成 20，反而塞进 20 轮历史。
+  const messageLimit = workspace?.openAiHistory ?? 20;
   const hasVectorizedSpace = await VectorDb.hasNamespace(workspace.slug);
   const embeddingsCount = await VectorDb.namespaceCount(workspace.slug);
 

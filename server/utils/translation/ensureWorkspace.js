@@ -25,28 +25,44 @@ const {
   TRANSLATION_WORKSPACE_SLUG_PREFIX,
 } = require("./constants");
 const { TRANSLATION_SYSTEM_PROMPT } = require("./promptBuilder");
+const { SystemSettings } = require("../../models/systemSettings");
 
 /**
- * 用原生 workspace 字段承载翻译配置（幂等，只在未初始化时写入）。
+ * 用原生 workspace 字段承载翻译配置（幂等，只在仍是系统默认值时写入）。
  * 写入后管理员可以在 workspace 设置里直接改指令/温度，无需改代码或重建镜像。
  *
- * - openAiPrompt：翻译系统指令（原生字段，UI 可编辑）
- * - openAiTemp  ：0.3，翻译需要稳定输出
- * - openAiHistory：2，翻译是单轮任务，默认 20 条历史只会白白消耗上下文
+ * ⚠️ 关键：Workspace.new() 会自动给新 workspace 填入系统默认提示词
+ * （见 models/workspace.js 的 `additionalFields.openAiPrompt = this.defaultPrompt`），
+ * 因此**不能**用「openAiPrompt 非空」来判断"管理员已改过"——那样翻译指令永远写不进去。
+ * 必须判断它是否仍是系统默认值。
+ *
+ * - openAiPrompt ：翻译系统指令（原生字段，UI 可编辑）
+ * - openAiTemp   ：0.3，翻译需要稳定输出
+ * - openAiHistory：0，翻译是纯单轮任务，历史只会污染上下文并被模型模仿格式
  *
  * @param {Object|null} workspace
  * @returns {Promise<Object|null>}
  */
 async function applyTranslationDefaults(workspace) {
-  // openAiPrompt 非空视为已初始化（可能是管理员手工改过的），不再覆盖
-  if (!workspace || workspace.openAiPrompt) return workspace;
+  if (!workspace) return workspace;
+
+  const customDefault = await SystemSettings.get({
+    label: "default_system_prompt",
+  });
+  const systemDefault =
+    customDefault?.value || SystemSettings.saneDefaultSystemPrompt;
+
+  // 仍是系统默认提示词（或为空）才写入；管理员手工改过的保持不动
+  const isUntouched =
+    !workspace.openAiPrompt || workspace.openAiPrompt === systemDefault;
+  if (!isUntouched) return workspace;
 
   await prisma.workspaces.update({
     where: { id: workspace.id },
     data: {
       openAiPrompt: TRANSLATION_SYSTEM_PROMPT,
       openAiTemp: 0.3,
-      openAiHistory: 2,
+      openAiHistory: 0,
     },
   });
   return Workspace.get({ id: workspace.id });
