@@ -255,7 +255,7 @@ class OllamaAILLM {
     ];
   }
 
-  async getChatCompletion(messages = null, { temperature = 0.7 }) {
+  async getChatCompletion(messages = null, { temperature = 0.7, think = null }) {
     const result = await LLMPerformanceMonitor.measureAsyncFunction(
       this.client
         .chat({
@@ -271,6 +271,9 @@ class OllamaAILLM {
               ? {} // TODO: if in base mode, maybe we just use half the context window when below <10K?
               : { num_ctx: this.promptWindowLimit() }),
           },
+          // Ollama 原生协议的 think 是**顶层**字段（不是 options 里的），
+          // 只有它能真正关闭思考；/v1 兼容接口传 think 无效。
+          ...(think === null ? {} : { think }),
         })
         .then((res) => {
           let content = res.message.content;
@@ -309,7 +312,10 @@ class OllamaAILLM {
     };
   }
 
-  async streamGetChatCompletion(messages = null, { temperature = 0.7 }) {
+  async streamGetChatCompletion(
+    messages = null,
+    { temperature = 0.7, think = null }
+  ) {
     const measuredStreamRequest = await LLMPerformanceMonitor.measureStream(
       this.client.chat({
         model: this.model,
@@ -325,6 +331,8 @@ class OllamaAILLM {
             : { num_ctx: this.promptWindowLimit() }),
         },
         stream_options: { include_usage: true },
+        // 顶层字段，见 getChatCompletion 中的说明。
+        ...(think === null ? {} : { think }),
       }),
       messages,
       false

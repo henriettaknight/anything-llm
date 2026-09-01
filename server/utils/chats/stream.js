@@ -13,6 +13,8 @@ const {
   recentChatHistory,
   sourceIdentifier,
 } = require("./index");
+const { resolveThink } = require("../helpers/chat/think");
+const { isTranslationWorkspace } = require("../../utils/translation/constants");
 
 const VALID_CHAT_MODE = ["chat", "query"];
 
@@ -24,7 +26,10 @@ async function streamChatWithWorkspace(
   user = null,
   thread = null,
   attachments = [],
-  feature = null
+  feature = null,
+  // 调用方附加的自定义 metrics（如翻译的 translationMeta），
+  // 会并入落库的 response.metrics 与 finalizeResponseStream 推送。
+  extraMetrics = null
 ) {
   const uuid = uuidv4();
   const updatedMessage = await grepCommand(message, user);
@@ -56,6 +61,13 @@ async function streamChatWithWorkspace(
     provider: workspace?.chatProvider,
     model: workspace?.chatModel,
   });
+
+  // 思考开关按场景解析：翻译默认关闭，其余默认开启。
+  // 仅 Ollama provider 会消费该参数，其它 provider 忽略（无副作用）。
+  const think = resolveThink(
+    isTranslationWorkspace(workspace) ? "translation" : "chat"
+  );
+
   const VectorDb = getVectorDbClass();
 
   const messageLimit = workspace?.openAiHistory || 20;
@@ -253,6 +265,7 @@ async function streamChatWithWorkspace(
       await LLMConnector.getChatCompletion(messages, {
         temperature: workspace?.openAiTemp ?? LLMConnector.defaultTemp,
         user: user,
+        think,
       });
 
     completeText = textResponse;
@@ -270,6 +283,7 @@ async function streamChatWithWorkspace(
     const stream = await LLMConnector.streamGetChatCompletion(messages, {
       temperature: workspace?.openAiTemp ?? LLMConnector.defaultTemp,
       user: user,
+      think,
     });
     completeText = await LLMConnector.handleStream(response, stream, {
       uuid,
@@ -277,6 +291,10 @@ async function streamChatWithWorkspace(
     });
     metrics = stream.metrics;
   }
+
+  // 并入调用方附加的自定义 metrics（如翻译的 translationMeta），
+  // 供落库与 finalizeResponseStream 一起推送给前端。
+  if (extraMetrics) metrics = { ...(metrics || {}), ...extraMetrics };
 
   // 代码检测（code_review）用量落库：仅在请求显式带 feature 标记时写 usage_logs
   if (feature === "code_review" && metrics) {

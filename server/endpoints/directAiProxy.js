@@ -14,6 +14,7 @@
 const { Agent } = require("undici");
 const { userFromSession } = require("../utils/http");
 const { recordUsage } = require("../utils/usageLogs");
+const { resolveThink } = require("../utils/helpers/chat/think");
 
 const PROXY_TIMEOUT = 10 * 60 * 1000;
 const proxyAgent = new Agent({
@@ -173,7 +174,10 @@ function directAiProxyEndpoints(app) {
             temperature: typeof body.temperature === 'number' ? body.temperature : 0.7,
             options: {
               num_ctx: body.options?.num_ctx || 32768
-            }
+            },
+            // 代码检测默认开启思考（OLLAMA_THINK_CODEREVIEW），关闭前需先用
+            // gui.h 等样本做 A/B 验证召回率，避免思维链缺失导致漏报。
+            think: resolveThink('codereview')
           };
           console.log('[DirectAIProxy] Transformed to Ollama format');
         } else if (isOpenAI) {
@@ -192,7 +196,8 @@ function directAiProxyEndpoints(app) {
               temperature: typeof body.temperature === 'number' ? body.temperature : 0.7,
               options: {
                 num_ctx: body.options?.num_ctx || 32768
-              }
+              },
+              think: resolveThink('codereview')
             };
           }
         }

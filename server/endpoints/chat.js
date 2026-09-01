@@ -18,7 +18,7 @@ const { User } = require("../models/user");
 const truncate = require("truncate");
 const { getModelTag } = require("./utils");
 const { isTranslationWorkspace } = require("../utils/translation/constants");
-const { workspaceChatAdapter } = require("../utils/translation/workspaceChatAdapter");
+const { enhanceTranslationPrompt } = require("../utils/translation/enhancePrompt");
 
 function chatEndpoints(app) {
   if (!app) return;
@@ -62,45 +62,23 @@ function chatEndpoints(app) {
           return;
         }
 
-        // 翻译 workspace 分支：走独立 adapter，跳过原生 stream.js（避免 query 模式早退）
-        if (isTranslationWorkspace(workspace)) {
-          await workspaceChatAdapter(response, {
-            workspace,
-            message,
-            glossaryIds,
-            thread: null,
-            user,
-          });
-          await Telemetry.sendTelemetry("sent_chat", {
-            multiUserMode: multiUserMode(response),
-            LLMSelection: process.env.LLM_PROVIDER || "openai",
-            Embedder: process.env.EMBEDDING_ENGINE || "inherit",
-            VectorDbSelection: process.env.VECTOR_DB || "pgvector",
-            multiModal: Array.isArray(attachments) && attachments?.length !== 0,
-            TTSSelection: process.env.TTS_PROVIDER || "native",
-            LLMModel: getModelTag(),
-          });
-          await EventLogs.logEvent(
-            "sent_chat",
-            {
-              workspaceName: workspace?.name,
-              chatModel: workspace?.chatModel || "System Default",
-            },
-            user?.id
-          );
-          response.end();
-          return;
-        }
+        // 翻译 workspace：只做「术语抽取 + 翻译记忆检索」的增强，
+        // 生成/流式/落库全部交回原生 streamChatWithWorkspace，
+        // 从而自动适配 provider（ollama/openai/...）、享受统一思考开关与用量统计。
+        const translation = isTranslationWorkspace(workspace)
+          ? await enhanceTranslationPrompt(message, glossaryIds)
+          : null;
 
         await streamChatWithWorkspace(
           response,
           workspace,
-          message,
+          translation?.prompt ?? message,
           workspace?.chatMode,
           user,
           null,
           attachments,
-          feature
+          feature,
+          translation ? { translationMeta: translation.translationMeta } : null
         );
         await Telemetry.sendTelemetry("sent_chat", {
           multiUserMode: multiUserMode(response),
@@ -180,62 +158,22 @@ function chatEndpoints(app) {
           return;
         }
 
-        // 翻译 workspace 分支：走独立 adapter，跳过原生 stream.js + autoRenameThread
-        if (isTranslationWorkspace(workspace)) {
-          await workspaceChatAdapter(response, {
-            workspace,
-            message,
-            glossaryIds,
-            thread,
-            user,
-          });
-          // 翻译 workspace 也自动改名 thread（与原生一致）
-          await WorkspaceThread.autoRenameThread({
-            thread,
-            workspace,
-            user,
-            newName: truncate(message, 22),
-            onRename: (thread) => {
-              writeResponseChunk(response, {
-                action: "rename_thread",
-                thread: {
-                  slug: thread.slug,
-                  name: thread.name,
-                },
-              });
-            },
-          });
-          await Telemetry.sendTelemetry("sent_chat", {
-            multiUserMode: multiUserMode(response),
-            LLMSelection: process.env.LLM_PROVIDER || "openai",
-            Embedder: process.env.EMBEDDING_ENGINE || "inherit",
-            VectorDbSelection: process.env.VECTOR_DB || "pgvector",
-            multiModal: Array.isArray(attachments) && attachments?.length !== 0,
-            TTSSelection: process.env.TTS_PROVIDER || "native",
-            LLMModel: getModelTag(),
-          });
-          await EventLogs.logEvent(
-            "sent_chat",
-            {
-              workspaceName: workspace.name,
-              thread: thread.name,
-              chatModel: workspace?.chatModel || "System Default",
-            },
-            user?.id
-          );
-          response.end();
-          return;
-        }
+        // 翻译 workspace：同上，只做检索增强；
+        // thread 自动改名由下方原生逻辑统一处理（原本的 adapter 分支是重复实现）。
+        const translation = isTranslationWorkspace(workspace)
+          ? await enhanceTranslationPrompt(message, glossaryIds)
+          : null;
 
         await streamChatWithWorkspace(
           response,
           workspace,
-          message,
+          translation?.prompt ?? message,
           workspace?.chatMode,
           user,
           thread,
           attachments,
-          feature
+          feature,
+          translation ? { translationMeta: translation.translationMeta } : null
         );
 
         // If thread was renamed emit event to frontend via special `action` response.

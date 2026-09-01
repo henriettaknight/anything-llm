@@ -24,6 +24,33 @@ const {
   TRANSLATION_WORKSPACE_NAME,
   TRANSLATION_WORKSPACE_SLUG_PREFIX,
 } = require("./constants");
+const { TRANSLATION_SYSTEM_PROMPT } = require("./promptBuilder");
+
+/**
+ * 用原生 workspace 字段承载翻译配置（幂等，只在未初始化时写入）。
+ * 写入后管理员可以在 workspace 设置里直接改指令/温度，无需改代码或重建镜像。
+ *
+ * - openAiPrompt：翻译系统指令（原生字段，UI 可编辑）
+ * - openAiTemp  ：0.3，翻译需要稳定输出
+ * - openAiHistory：2，翻译是单轮任务，默认 20 条历史只会白白消耗上下文
+ *
+ * @param {Object|null} workspace
+ * @returns {Promise<Object|null>}
+ */
+async function applyTranslationDefaults(workspace) {
+  // openAiPrompt 非空视为已初始化（可能是管理员手工改过的），不再覆盖
+  if (!workspace || workspace.openAiPrompt) return workspace;
+
+  await prisma.workspaces.update({
+    where: { id: workspace.id },
+    data: {
+      openAiPrompt: TRANSLATION_SYSTEM_PROMPT,
+      openAiTemp: 0.3,
+      openAiHistory: 2,
+    },
+  });
+  return Workspace.get({ id: workspace.id });
+}
 
 /**
  * 为当前用户确保存在翻译 workspace，返回该 workspace（含 id/slug/name/chatMode 等完整字段）。
@@ -45,7 +72,7 @@ async function ensureTranslationWorkspace(user) {
       });
       if (!link) await WorkspaceUser.create(user.id, existing.id);
     }
-    return existing;
+    return applyTranslationDefaults(existing);
   }
 
   // 2. 新建：Workspace.new 会自动建 workspace_users 关联
@@ -66,8 +93,8 @@ async function ensureTranslationWorkspace(user) {
     data: { slug: targetSlug },
   });
 
-  // 4. 重新 get 返回带新 slug 的完整 workspace
-  return Workspace.get({ id: workspace.id });
+  // 4. 写翻译默认配置，然后重新 get 返回带新 slug 的完整 workspace
+  return applyTranslationDefaults(await Workspace.get({ id: workspace.id }));
 }
 
 module.exports = { ensureTranslationWorkspace };
