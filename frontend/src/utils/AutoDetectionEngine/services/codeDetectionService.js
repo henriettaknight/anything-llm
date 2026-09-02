@@ -110,8 +110,8 @@ export function getServerLog() {
  */
 export async function getUEDefectDetectionPrompt(projectType) {
   // Validate projectType
-  if (!projectType || !['ue_cpp', 'ue_blueprint', 'cpp'].includes(projectType)) {
-    throw new Error(`Invalid project type: ${projectType}. Must be 'ue_cpp', 'ue_blueprint' or 'cpp'`);
+  if (!projectType || !['ue_cpp', 'ue_blueprint', 'cpp', 'ts', 'ts_famegame'].includes(projectType)) {
+    throw new Error(`Invalid project type: ${projectType}. Must be 'ue_cpp', 'ue_blueprint', 'cpp', 'ts' or 'ts_famegame'`);
   }
 
   try {
@@ -125,9 +125,11 @@ export async function getUEDefectDetectionPrompt(projectType) {
       const prompt = await response.text();
       const promptFile = projectType === 'cpp'
         ? (userLang === 'zh' ? 'cpp_prompt.md' : 'cpp_prompt_en.md')
-        : projectType === 'ue_cpp' 
-          ? (userLang === 'zh' ? 'ue5_cpp_prompt.md' : 'ue5_cpp_prompt_en.md')
-          : (userLang === 'zh' ? 'ue5_blueprint_prompt.md' : 'ue5_blueprint_prompt_en.md');
+        : (projectType === 'ts' || projectType === 'ts_famegame')
+          ? 'ts_prompt.md (+ ts_contexts/famegame.md + _tauri.md)'
+          : projectType === 'ue_cpp' 
+            ? (userLang === 'zh' ? 'ue5_cpp_prompt.md' : 'ue5_cpp_prompt_en.md')
+            : (userLang === 'zh' ? 'ue5_blueprint_prompt.md' : 'ue5_blueprint_prompt_en.md');
       serverLog?.info(`✓ 成功从 API 获取提示词，长度: ${prompt.length} 字符`);
       serverLog?.info(`✓ 提示词来源: ${promptFile} 文件`);
       return prompt;
@@ -500,6 +502,17 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
       }
     }
 
+    // ===== TS 项目：把代码块语言与输出契约切换为 TypeScript 对象格式 =====
+    if (projectType === 'ts' || projectType === 'ts_famegame') {
+      userMessage = userMessage
+        .replace(/```cpp/g, '```typescript')
+        .replace(/C\+\+代码文件/g, 'TypeScript 代码文件')
+        .replace(/C\+\+ code files/g, 'TypeScript code files')
+        .replace(/C\+\+ code file\b/g, 'TypeScript code file')
+        .replace(/JSON 数组输出/g, 'JSON 对象输出（含 summary / issues / improvements / recheck，严格按提示词第八节格式）')
+        .replace(/JSON array only/g, 'JSON object (summary/issues/improvements/recheck) per the prompt section 8');
+    }
+
     // Build message history
     const messageHistory = [
       { role: 'system', content: systemPrompt },
@@ -520,7 +533,7 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
     // ===== 多次采样取并集（N=2 默认，平衡召回与成本）=====
     // 单次 LLM 检测存在固有随机性（实测单次召回仅 ~45%），多次采样后按位置合并去重，
     // 可把召回率提升到 ~85%，并让 gui.h 等头文件缺陷稳定出现。
-    const SAMPLE_COUNT = 2;
+    const SAMPLE_COUNT = (projectType === 'ts' || projectType === 'ts_famegame') ? 1 : 2;
     const timeout = 300000; // 300 seconds per sample
 
     // 单次采样的封装：调用一次 AI，返回 {content, usage}（失败/超时返回 null，不中断其它采样）
@@ -604,7 +617,7 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
     for (const resp of sampleResponses) {
       if (!resp || !resp.content) continue;
       // 单次响应内部先用「prompt-ack 重试」逻辑兜底（对应原 L623-656）
-      let parsed = parseDefectDetectionResults(resp.content, fileInfo.path);
+      let parsed = parseDefectDetectionResults(resp.content, fileInfo.path, projectType);
       if (parsed.length === 0 && isPromptAckOrMetaResponse(resp.content)) {
         serverLog?.warn(`采样响应疑似提示词确认文本，触发强约束重试: ${fileInfo.name}`);
         try {
@@ -613,13 +626,15 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
           const retryResult = await codeReviewAIService.adapter.chat(
             [
               ...messageHistory,
-              { role: 'user', content: '你已经拿到了完整代码。不要重复说明规则、不要索要代码、不要前言。现在仅返回 JSON 数组（可为空数组），字段固定：no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence。' }
+              { role: 'user', content: (projectType === 'ts' || projectType === 'ts_famegame')
+                ? '你已经拿到了完整代码。不要重复说明规则、不要索要代码、不要前言。现在仅返回 JSON 对象（不要返回数组）：{"summary":{"scope":string,"by_category":{},"by_confidence":{}},"issues":[{category,priority,severity,confidence,file,lines,rule,title,description,suggestion,code_snippet,related_design}],"improvements":[],"recheck":[]}。issues 可为空数组。'
+                : '你已经拿到了完整代码。不要重复说明规则、不要索要代码、不要前言。现在仅返回 JSON 数组（可为空数组），字段固定：no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence。' }
             ],
             { signal: retryAbort.signal }
           );
           const retryResp = retryResult.content || retryResult.fullText || '';
           clearTimeout(retryTimeoutId);
-          if (retryResp) parsed = parseDefectDetectionResults(retryResp, fileInfo.path);
+          if (retryResp) parsed = parseDefectDetectionResults(retryResp, fileInfo.path, projectType);
         } catch (retryError) {
           serverLog?.error(`采样强约束重试失败: ${fileInfo.name}`, retryError);
         }
@@ -839,9 +854,10 @@ export function isPromptAckOrMetaResponse(response) {
  * Parse AI returned defect detection results (using relaxed static detection parsing logic)
  * @param {string} response - AI response
  * @param {string} filePath - File path
+ * @param {string} projectType - Project type ('ts'/'ts_famegame' 走 TS 对象格式分支；缺省则降级为 C++ 数组格式)
  * @returns {DefectDetectionResult[]} - List of parsed defects
  */
-export function parseDefectDetectionResults(response, filePath) {
+export function parseDefectDetectionResults(response, filePath, projectType) {
   const defects = [];
   
   console.log('\n' + '🔧'.repeat(40));
@@ -866,6 +882,57 @@ export function parseDefectDetectionResults(response, filePath) {
     return defects;
   }
   
+  // ===== TS 对象格式分支（projectType 以 'ts' 开头）=====
+  // ts_prompt.md 输出顶层对象 { summary, issues, improvements, recheck }
+  const isTsProject = projectType === 'ts' || projectType === 'ts_famegame';
+  if (isTsProject) {
+    try {
+      const jsonText = response
+        .replace(/```(?:json)?\s*/gi, '')
+        .replace(/```\s*/g, '')
+        .trim();
+      const objStart = jsonText.indexOf('{');
+      const objEnd = jsonText.lastIndexOf('}');
+      if (objStart !== -1 && objEnd > objStart) {
+        const objStr = jsonText.slice(objStart, objEnd + 1);
+        const parsed = JSON.parse(objStr);
+        if (parsed && Array.isArray(parsed.issues)) {
+          const capitalize = (s) => { s = String(s).toLowerCase(); return s.charAt(0).toUpperCase() + s.slice(1); };
+          const normalizeTsLines = (raw) => {
+            if (!raw) return '';
+            const s = String(raw).trim();
+            const m = s.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+            if (m) return m[2] ? `L${m[1]}-L${m[2]}` : `L${m[1]}`;
+            return s; // 已是 L 前缀或非数字则原样返回
+          };
+          const tsDefects = parsed.issues.map((item) => ({
+            category: item.category || 'UNKNOWN',
+            file: item.file || filePath,
+            function: '',                                       // TS 无此字段
+            snippet: item.code_snippet || '',                  // 字段映射
+            lines: normalizeTsLines(item.lines),               // 归一化为 L{n} / L{a}-L{b}
+            risk: item.title || '',                            // title → risk
+            howToTrigger: item.description || '',              // description → howToTrigger
+            suggestedFix: item.suggestion || '',               // suggestion → suggestedFix
+            confidence: capitalize(item.confidence || 'medium'), // high/medium/low → High/Medium/Low
+            priority: item.priority || '',
+            severity: item.severity || '',
+            rule: item.rule || '',
+            relatedDesign: item.related_design || null,
+            title: item.title || '',
+            description: item.description || '',
+          }));
+          console.log(`  ✅ TS object parsed: ${tsDefects.length} defects`);
+          console.log('🔧'.repeat(40) + '\n');
+          return tsDefects;
+        }
+      }
+    } catch (e) {
+      console.log('  ⚠️ TS object parse failed:', e.message);
+      // 继续走下方 JSON 数组分支（兼容降级）
+    }
+  }
+
   // 0. JSON array format (highest priority)
   console.log('  🔍 Trying JSON array format (priority)...');
   try {
@@ -1698,7 +1765,10 @@ export async function detectDefectsInFiles(files, directoryHandle, onProgress, p
     defectsFound: 0,
     defects: [],
     projectType: projectType,
-    summary: (projectType === 'ue_cpp' || projectType === 'cpp') ? {
+    summary: (projectType === 'ts' || projectType === 'ts_famegame') ? {
+      type: 0, react: 0, async: 0, state: 0, leak: 0, security: 0, null: 0,
+      perf: 0, err: 0, logic: 0, tauri: 0, i18n: 0, dep: 0, arch: 0,
+    } : (projectType === 'ue_cpp' || projectType === 'cpp') ? {
       auto: 0,
       array: 0,
       memf: 0,
@@ -1807,7 +1877,7 @@ function generateReportId() {
  * @param {Function} [onReportSaved] - Callback after report is saved
  * @returns {Promise<GroupDetectionReport[]>} - Group detection reports
  */
-export async function detectDefectsByGroups(groups, rootFiles, directoryHandle, onReportSaved) {
+export async function detectDefectsByGroups(groups, rootFiles, directoryHandle, onReportSaved, projectType) {
   const reports = [];
   
   // Dynamically import report generation service
@@ -1838,7 +1908,8 @@ export async function detectDefectsByGroups(groups, rootFiles, directoryHandle, 
       () => {
         processedFiles++;
         // File-level progress - no output, silent processing
-      }
+      },
+      projectType
     );
     
     const groupReport = {
@@ -1880,7 +1951,8 @@ export async function detectDefectsByGroups(groups, rootFiles, directoryHandle, 
       () => {
         processedFiles++;
         // File-level progress - no output, silent processing
-      }
+      },
+      projectType
     );
     
     const groupReport = {

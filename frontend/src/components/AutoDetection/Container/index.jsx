@@ -203,6 +203,8 @@ export default function AutoDetectionContainer() {
         timestamp: groupReport.timestamp,
         defects: groupReport.defects || [],
         fileResults: detectionReport.fileResults || [],  // ← 使用转换后的 fileResults
+        groups: groupReport.groups || [],               // ← 保留完整分组结构，供报告区下载复用（与自动下载逐组命名一致，避免退化为 all.xlsx）
+        tokenStats: groupReport.tokenStats || null,     // ← 保留 token 统计，供报告区下载产出 token_statistics.xlsx（与自动下载一致）
         summary: detectionReport.summary || { bySeverity: {}, byType: {} }
       };
       
@@ -252,7 +254,7 @@ export default function AutoDetectionContainer() {
         detectionTime: newConfig.detectionTime || "",
         projectType: newConfig.projectType || "",
         enabled: newConfig.enabled || false,
-        fileTypes: newConfig.fileTypes || ['.h', '.cpp', '.c', '.hpp', '.cc'],
+        fileTypes: newConfig.fileTypes || (['ts', 'ts_famegame'].includes(newConfig.projectType) ? ['.ts', '.tsx', '.js', '.jsx'] : ['.h', '.cpp', '.c', '.hpp', '.cc']),
         excludePatterns: newConfig.excludePatterns || [
           '**/node_modules/**',
           '**/build/**',

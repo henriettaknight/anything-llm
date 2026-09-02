@@ -102,7 +102,7 @@ class ZipPackageServiceImpl {
    * @returns {string} - HTML content
    */
   generateHTMLSummary(options) {
-    const { defectReports = [], tokenStats = null, sessionId = '' } = options;
+    const { defectReports = [], tokenStats = null, sessionId = '', projectType = 'cpp' } = options;
 
     // Calculate totals
     const totalFiles = defectReports.reduce((sum, r) => sum + (r.filesScanned || 0), 0);
@@ -187,7 +187,8 @@ class ZipPackageServiceImpl {
       defectReports,
       defectTypeCounts,
       tokenStats,
-      sessionId
+      sessionId,
+      projectType
     });
 
     return html;

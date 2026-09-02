@@ -295,7 +295,8 @@ class TaskSchedulerImpl {
                 hasChanges: true
               });
             }
-          }
+          },
+          this.config.projectType
         );
         
         console.log(`检测完成，生成 ${reports.length} 份报告`);

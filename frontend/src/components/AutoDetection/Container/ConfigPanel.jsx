@@ -178,7 +178,9 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
       detectionTime: formData.detectionTime,
       projectType: formData.projectType,
       enabled: true,
-      fileTypes: ['.h', '.cpp', '.c', '.hpp', '.cc'], // 所有 UE5 项目都检测 C++ 文件
+      fileTypes: ['ts', 'ts_famegame'].includes(formData.projectType)
+        ? ['.ts', '.tsx', '.js', '.jsx']
+        : ['.h', '.cpp', '.c', '.hpp', '.cc'], // TS 项目检测 TS/TSX，其余检测 C++ 文件
       excludePatterns: [
         '**/node_modules/**',
         '**/build/**',
@@ -318,6 +320,12 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
             </option>
             <option value="cpp">
               {t("autodetection.config.projectType.cpp", "标准 C++ 项目 (Standard C++)")}
+            </option>
+            <option value="ts">
+              {t("autodetection.config.projectType.ts", "TypeScript 项目（通用）")}
+            </option>
+            <option value="ts_famegame">
+              {t("autodetection.config.projectType.ts_famegame", "TypeScript — FameGameEditor")}
             </option>
           </select>
           {errors.projectType && (

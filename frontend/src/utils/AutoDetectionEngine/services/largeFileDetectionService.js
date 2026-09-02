@@ -190,7 +190,7 @@ async function chatWithTimeout(adapter, messageHistory) {
  * 行号恢复交由 locateChunkDefects 基于整文件定位完成。
  * @returns {Promise<Array>}
  */
-async function detectSingleChunk({ fileInfo, slice, startLine, endLine, systemPrompt, fileContent, headerSkeleton, headerPath, fileStructureSkeleton, currentScope }) {
+async function detectSingleChunk({ fileInfo, slice, startLine, endLine, systemPrompt, fileContent, headerSkeleton, headerPath, fileStructureSkeleton, currentScope, projectType }) {
   const adapter = getCodeReviewAIService();
   if (!adapter || !adapter.adapter || typeof adapter.adapter.chat !== 'function') {
     throw new Error('AI adapter 未初始化或缺少 chat 方法');
@@ -209,6 +209,7 @@ async function detectSingleChunk({ fileInfo, slice, startLine, endLine, systemPr
     headerPath,
     fileStructureSkeleton,
     currentScope,
+    projectType,
   });
   const messageHistory = [
     { role: 'system', content: systemPrompt },
@@ -216,7 +217,7 @@ async function detectSingleChunk({ fileInfo, slice, startLine, endLine, systemPr
   ];
 
   const responseContent = await chatWithTimeout(adapter, messageHistory);
-  let defects = parseDefectDetectionResults(responseContent.content, fileInfo.path);
+  let defects = parseDefectDetectionResults(responseContent.content, fileInfo.path, projectType);
   let chunkUsage = responseContent.usage;
 
   // 重试（与整文件逻辑一致）：疑似确认/寒暄文本时强约束重试一次
@@ -225,12 +226,14 @@ async function detectSingleChunk({ fileInfo, slice, startLine, endLine, systemPr
       ...messageHistory,
       {
         role: 'user',
-        content: '你已拿到完整代码。不要重复规则说明、不要索要代码、不要前言。现在仅返回 JSON 数组（可为空数组），字段固定：no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence。',
+        content: (projectType === 'ts' || projectType === 'ts_famegame')
+          ? '你已拿到完整代码。不要重复规则说明、不要索要代码、不要前言。现在仅返回 JSON 对象（不要返回数组）：{"summary":{"scope":string,"by_category":{},"by_confidence":{}},"issues":[{category,priority,severity,confidence,file,lines,rule,title,description,suggestion,code_snippet,related_design}],"improvements":[],"recheck":[]}。issues 可为空数组。'
+          : '你已拿到完整代码。不要重复规则说明、不要索要代码、不要前言。现在仅返回 JSON 数组（可为空数组），字段固定：no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence。',
       },
     ];
     try {
       const retryResp = await chatWithTimeout(adapter, retryHistory);
-      if (retryResp.content) defects = parseDefectDetectionResults(retryResp.content, fileInfo.path);
+      if (retryResp.content) defects = parseDefectDetectionResults(retryResp.content, fileInfo.path, projectType);
       if (retryResp.usage) chunkUsage = retryResp.usage;
     } catch (_e) {
       // 忽略重试错误，沿用空结果
@@ -303,7 +306,8 @@ export async function detectLargeFileDefects({ fileInfo, fileContent, projectTyp
     // 提取失败/无配对头文件时静默降级为无骨架，不影响分块主流程。
     let headerSkeleton = '';
     let headerPath = '';
-    if (headerRef && headerRef.content) {
+    const isTsChunk = projectType === 'ts' || projectType === 'ts_famegame';
+    if (headerRef && headerRef.content && !isTsChunk) {
       try {
         const { extractHeaderSkeleton } = await import('../context/headerSkeletonExtractor.js');
         headerSkeleton = extractHeaderSkeleton(headerRef.content) || '';
@@ -322,9 +326,10 @@ export async function detectLargeFileDefects({ fileInfo, fileContent, projectTyp
       serverLog?.info(`[大文件闸门] ${fileInfo.name} 无配对头文件，按无骨架检测`);
     }
 
-    const chunks = buildChunks(fileContent);
+    const chunkThreshold = (projectType === 'ts' || projectType === 'ts_famegame') ? 350 : SINGLE_FILE_CHUNK_THRESHOLD;
+    const chunks = buildChunks(fileContent, chunkThreshold);
     coverage.totalChunks = chunks.length;
-    serverLog?.info(`[大文件闸门] ${fileInfo.name} 切分为 ${chunks.length} 块（阈值 ${SINGLE_FILE_CHUNK_THRESHOLD}，重叠 ${CHUNK_OVERLAP}）`);
+    serverLog?.info(`[大文件闸门] ${fileInfo.name} 切分为 ${chunks.length} 块（阈值 ${chunkThreshold}，重叠 ${CHUNK_OVERLAP}）`);
 
     // 方案 4：若调用方传入了当前文件自身的结构骨架，则为每个块算出「当前所属作用域」。
     const structureSummary = fileStructure && fileStructure.summary ? fileStructure.summary : '';
@@ -350,6 +355,7 @@ export async function detectLargeFileDefects({ fileInfo, fileContent, projectTyp
           headerPath,
           fileStructureSkeleton: structureSummary,
           currentScope,
+          projectType,
         });
         const located = locateChunkDefects(chunkResult.defects, fileContent, ch, fileInfo);
         allDefects.push(...located);

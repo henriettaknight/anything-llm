@@ -328,16 +328,9 @@ export function validateDetectionResults(defects) {
 
     // Validate category
     const validCategories = [
-      "AUTO",
-      "ARRAY",
-      "MEMF",
-      "LEAK",
-      "OSRES",
-      "STL",
-      "DEPR",
-      "PERF",
-      "CLASS",
-      "COMPILE",
+      "AUTO", "ARRAY", "MEMF", "LEAK", "OSRES", "STL", "DEPR", "PERF", "CLASS", "COMPILE",
+      "NULL", "TICK", "LOOP", "EVENT", "CAST", "REF", "REPLICATE", "INTERFACE", "RESOURCE", "INIT", "ANIM", "UI",
+      "TYPE", "REACT", "ASYNC", "STATE", "SECURITY", "ERR", "LOGIC", "TAURI", "I18N", "DEP", "ARCH",
     ];
     if (
       defect.category &&

@@ -11,7 +11,8 @@ export function generateIntegratedReport(data) {
     defectReports,
     defectTypeCounts,
     tokenStats,
-    sessionId
+    sessionId,
+    projectType
   } = data;
 
   return `<!DOCTYPE html>
@@ -42,7 +43,7 @@ ${getStyles()}
   </div>
   
   <div id="defects-tab" class="tab-content active">
-${generateDefectsTab({ totalFiles, totalDefects, defectRate, defectReports, defectTypeCounts })}
+${generateDefectsTab({ totalFiles, totalDefects, defectRate, defectReports, defectTypeCounts, projectType })}
   </div>
   
   <div id="tokens-tab" class="tab-content">
@@ -278,7 +279,16 @@ function getStyles() {
     }`;
 }
 
-function generateDefectsTab({ totalFiles, totalDefects, defectRate, defectReports, defectTypeCounts }) {
+// 按 projectType 选择报告类目表头
+const CATEGORY_COLUMNS = {
+  cpp: ['AUTO', 'CLASS', 'DEPR', 'LEAK', 'MEMF', 'OSRES', 'PERF', 'STL'],
+  ue_cpp: ['AUTO', 'CLASS', 'DEPR', 'LEAK', 'MEMF', 'OSRES', 'PERF', 'STL'],
+  ue_blueprint: ['NULL', 'TICK', 'LOOP', 'EVENT', 'CAST', 'REF', 'REPLICATE', 'INTERFACE', 'RESOURCE', 'INIT', 'ANIM', 'UI', 'COMPILE'],
+  ts: ['TYPE', 'REACT', 'ASYNC', 'STATE', 'LEAK', 'SECURITY', 'NULL', 'PERF', 'ERR', 'LOGIC', 'TAURI', 'I18N', 'DEP', 'ARCH'],
+  ts_famegame: ['TYPE', 'REACT', 'ASYNC', 'STATE', 'LEAK', 'SECURITY', 'NULL', 'PERF', 'ERR', 'LOGIC', 'TAURI', 'I18N', 'DEP', 'ARCH'],
+};
+
+function generateDefectsTab({ totalFiles, totalDefects, defectRate, defectReports, defectTypeCounts, projectType }) {
   // 确保 defectTypeCounts 有值
   const safeDefectTypeCounts = defectTypeCounts || {};
   
@@ -305,14 +315,7 @@ function generateDefectsTab({ totalFiles, totalDefects, defectRate, defectReport
           <th>模块名</th>
           <th>检测文件数</th>
           <th>总缺陷数</th>
-          <th>AUTO</th>
-          <th>CLASS</th>
-          <th>DEPR</th>
-          <th>LEAK</th>
-          <th>MEMF</th>
-          <th>OSRES</th>
-          <th>PERF</th>
-          <th>STL</th>
+          ${(CATEGORY_COLUMNS[projectType] || CATEGORY_COLUMNS.cpp).map(c => `<th>${c}</th>`).join('')}
         </tr>
       </thead>
       <tbody>
@@ -325,14 +328,7 @@ function generateDefectsTab({ totalFiles, totalDefects, defectRate, defectReport
           <td><strong>${report.groupName}</strong></td>
           <td>${report.filesScanned || 0}</td>
           <td>${report.defectsFound || 0}</td>
-          <td>${defectsByType.AUTO || 0}</td>
-          <td>${defectsByType.CLASS || 0}</td>
-          <td>${defectsByType.DEPR || 0}</td>
-          <td>${defectsByType.LEAK || 0}</td>
-          <td>${defectsByType.MEMF || 0}</td>
-          <td>${defectsByType.OSRES || 0}</td>
-          <td>${defectsByType.PERF || 0}</td>
-          <td>${defectsByType.STL || 0}</td>
+          ${(CATEGORY_COLUMNS[projectType] || CATEGORY_COLUMNS.cpp).map(c => `<td>${defectsByType[c] || 0}</td>`).join('')}
         </tr>
         `;
         }).join('')}
@@ -340,14 +336,7 @@ function generateDefectsTab({ totalFiles, totalDefects, defectRate, defectReport
           <td>总计</td>
           <td>${totalFiles}</td>
           <td>${totalDefects}</td>
-          <td>${safeDefectTypeCounts.AUTO || 0}</td>
-          <td>${safeDefectTypeCounts.CLASS || 0}</td>
-          <td>${safeDefectTypeCounts.DEPR || 0}</td>
-          <td>${safeDefectTypeCounts.LEAK || 0}</td>
-          <td>${safeDefectTypeCounts.MEMF || 0}</td>
-          <td>${safeDefectTypeCounts.OSRES || 0}</td>
-          <td>${safeDefectTypeCounts.PERF || 0}</td>
-          <td>${safeDefectTypeCounts.STL || 0}</td>
+          ${(CATEGORY_COLUMNS[projectType] || CATEGORY_COLUMNS.cpp).map(c => `<td>${safeDefectTypeCounts[c] || 0}</td>`).join('')}
         </tr>
       </tbody>
     </table>

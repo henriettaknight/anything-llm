@@ -33,7 +33,7 @@ export async function buildChunkSystemPrompt(projectType) {
  * @param {string} [params.currentScope] 当前块主要所处的类/命名空间名称（方案4，帮助模型关联跨块类定义）
  * @returns {string}
  */
-export function buildChunkUserMessage({ filePath, pureName, slice, startLine, endLine, totalLines, extension, headerSkeleton, headerPath, fileStructureSkeleton, currentScope }) {
+export function buildChunkUserMessage({ filePath, pureName, slice, startLine, endLine, totalLines, extension, headerSkeleton, headerPath, fileStructureSkeleton, currentScope, projectType }) {
   const userLang = detectUserLanguage();
   const ext = extension ? `.${String(extension).replace(/^\./, '')}` : '';
   const hasSkeleton = !!(headerSkeleton && String(headerSkeleton).trim());
@@ -88,8 +88,9 @@ ${fileStructureSkeleton}
 - **The file structure skeleton above is ONLY for confirming which class/namespace this slice belongs to and its nesting** (e.g. a class is defined from line X to Y); **do NOT report defects against the structure** and never invent line numbers. If this slice is the middle of a class spanning multiple chunks, treat it as part of that class body using the skeleton.`
     : '';
 
+  let userMessage;
   if (userLang === 'zh') {
-    return `请对以下 C++ 代码文件的「一个连续片段」做静态缺陷检测（这是大文件分块送审中的第 ${startLine}-${endLine} 行片段，整体文件约 ${totalLines} 行）：
+    userMessage = `请对以下 C++ 代码文件的「一个连续片段」做静态缺陷检测（这是大文件分块送审中的第 ${startLine}-${endLine} 行片段，整体文件约 ${totalLines} 行）：
 
 文件名：${pureName}
 文件路径：${filePath}
@@ -109,7 +110,7 @@ ${slice}
 - \`file\` 填相对路径；\`lines\` 必须对应 \`file\` 在原始文件中的真实行号。
 - 推荐单次送审目标约 600-700 行，本片段已控制在此范围内。`;
   }
-  return `Please perform static defect detection on a **contiguous slice** of the C++ file below (this is slice lines ${startLine}-${endLine} of a large file, total ~${totalLines} lines):
+  userMessage = `Please perform static defect detection on a **contiguous slice** of the C++ file below (this is slice lines ${startLine}-${endLine} of a large file, total ~${totalLines} lines):
 
 File name: ${pureName}
 File path: ${filePath}
@@ -128,4 +129,16 @@ ${slice}
 - \`snippet\` must be pure code, without the \`L{n}:\` prefix.
 - \`file\` is the relative path; \`lines\` must correspond to the real line numbers of \`file\` in the original file.
 - Recommended single-pass target is ~600-700 lines; this slice is kept within that range.`;
+
+  // TS 项目：切换代码块语言与输出契约为 TypeScript 对象格式
+  if (projectType === 'ts' || projectType === 'ts_famegame') {
+    userMessage = userMessage
+      .replace(/```cpp/g, '```typescript')
+      .replace(/C\+\+ 代码文件/g, 'TypeScript 代码文件')
+      .replace(/C\+\+ file/g, 'TypeScript file')
+      .replace(/600-700 行/g, '300-400 行')
+      .replace(/JSON 数组输出/g, 'JSON 对象输出（含 summary / issues / improvements / recheck）')
+      .replace(/JSON array/g, 'JSON object (summary/issues/improvements/recheck)');
+  }
+  return userMessage;
 }

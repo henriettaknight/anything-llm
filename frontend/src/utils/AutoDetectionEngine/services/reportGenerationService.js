@@ -8,6 +8,7 @@ import ReportStorage from '../storage/reportStorage.js';
 import { createTranslationService } from './translationService.js';
 import { detectUserLanguage, needsTranslation } from '../utils/languageDetector.js';
 import { enhancedTranslate, containsChinese, validateTranslation } from './translationEnhancer.js';
+import { resolveReportGroups } from './reportDownloadResolver.js';
 
 /**
  * @typedef {Object} DefectInfo
@@ -966,15 +967,17 @@ class ReportGenerationServiceImpl {
       // Import zipPackageService
       const { default: zipPackageService } = await import('./zipPackageService.js');
       
-      // 与自动下载路径(detectionOrchestrator)保持一致：按分组生成多个缺陷明细 xlsx
-      const groups = (report.groups && report.groups.length)
-        ? report.groups
-        : [{ groupName: groupName || report.groupName || 'root', groupPath: report.groupPath || '.', batches: report.batches || [] }];
+      // 与自动下载路径(detectionOrchestrator)保持一致：按分组生成多个缺陷明细 xlsx。
+      // 自动下载的 detectionReport 携带完整 groups；报告区下载的已存报告在修复后也携带
+      // groups（见 Container.handleGroupReportGenerated），因此两者共用同一分组解析，
+      // 产出的 xlsx 文件名完全一致（base / group2 ...），不再退化为 all.xlsx。
+      const groups = resolveReportGroups(report, groupName);
 
       const defectReports = [];
       for (const grp of groups) {
-        const gName = grp.groupName || 'root';
-        const batchResults = (grp.batches || []).flatMap(batch => batch.results || []);
+        const gName = grp.groupName;
+        const batchResults = grp.batchResults;
+
         const groupReport = {
           groupName: gName,
           groupPath: grp.groupPath || '.',
