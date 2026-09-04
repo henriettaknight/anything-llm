@@ -14,14 +14,24 @@
 
 const { extractTerms } = require("./pythonBridge");
 const { retrieval } = require("./ragflowClient");
-const { buildTranslationPrompt } = require("./promptBuilder");
+const {
+  buildTranslationUserPrompt,
+  buildTranslationSystemAddendum,
+} = require("./promptBuilder");
 const { listGlossaries } = require("./glossaryManager");
 
 /**
- * 生成增强后的用户消息与翻译元信息。
+ * 生成翻译所需的 user message、system 追加段与翻译元信息。
+ *
+ * 职责划分：
+ *   - prompt          → 提交给大模型的 user message，**仅用户原文**，无任何拼接
+ *   - systemAddendum  → 追加到 system prompt 尾部的术语表 / 翻译记忆
+ *                       （按原文动态抽取，不能写死进 workspace.openAiPrompt）
+ *   - translationMeta → 术语命中数等元信息，随 metrics 回传前端并落库
+ *
  * @param {string} sourceText - 待译原文
  * @param {string[]} [glossaryIds=["default"]] - 术语库 ID 数组，靠后覆盖靠前
- * @returns {Promise<{prompt: string, translationMeta: Object|null}>}
+ * @returns {Promise<{prompt: string, systemAddendum: string, translationMeta: Object|null}>}
  */
 async function enhanceTranslationPrompt(sourceText, glossaryIds = ["default"]) {
   const ids =
@@ -49,10 +59,10 @@ async function enhanceTranslationPrompt(sourceText, glossaryIds = ["default"]) {
     console.error("[translation] retrieval failed:", err?.message || err);
   }
 
-  const prompt = buildTranslationPrompt({
+  const prompt = buildTranslationUserPrompt({ sourceText });
+  const systemAddendum = buildTranslationSystemAddendum({
     glossaryText: termsResult.glossary,
     chunks,
-    sourceText,
   });
 
   const glossaries = listGlossaries() || [];
@@ -66,6 +76,7 @@ async function enhanceTranslationPrompt(sourceText, glossaryIds = ["default"]) {
 
   return {
     prompt,
+    systemAddendum,
     translationMeta: {
       glossaryIds: usedIds,
       glossaryNames,

@@ -25,7 +25,11 @@ const { WorkspaceChats } = require("../../models/workspaceChats");
 const { writeResponseChunk } = require("../helpers/chat/responses");
 const { extractTerms } = require("./pythonBridge");
 const { retrieval } = require("./ragflowClient");
-const { buildTranslationPrompt } = require("./promptBuilder");
+const {
+  // 该路径把整段内容塞进 system 角色，因此这里把术语表段与原文拼成一段（保持原行为）
+  buildTranslationUserPrompt,
+  buildTranslationSystemAddendum,
+} = require("./promptBuilder");
 const { listGlossaries } = require("./glossaryManager");
 const { streamLlmTranslation } = require("./llmStreamer");
 
@@ -58,11 +62,16 @@ async function workspaceChatAdapter(response, opts) {
     const chunks = await retrieval(message, datasetIds, 5);
 
     // 步骤 3：拼 prompt
-    const prompt = buildTranslationPrompt({
+    // 本路径走「整段塞 system 角色」，故术语表段 + 原文合成一段；
+    // 主路径（chat.js → streamChatWithWorkspace）则是术语表挂 system、user message 只放原文。
+    const systemAddendum = buildTranslationSystemAddendum({
       glossaryText: termsResult.glossary,
       chunks,
-      sourceText: message,
     });
+    const userPrompt = buildTranslationUserPrompt({ sourceText: message });
+    const prompt = systemAddendum
+      ? `${systemAddendum}\n\n${userPrompt}`
+      : userPrompt;
 
     // 步骤 4：流式生成译文，按原生 chat 协议推 textResponseChunk
     fullTranslation = await streamLlmTranslation(prompt, (token) => {

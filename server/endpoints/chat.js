@@ -78,7 +78,11 @@ function chatEndpoints(app) {
           null,
           attachments,
           feature,
-          translation ? { translationMeta: translation.translationMeta } : null
+          translation ? { translationMeta: translation.translationMeta } : null,
+          // 落库用原文：存到数据库的 workspace_chats.prompt 必须是用户原始提问。
+          translation ? message : null,
+          // 术语表 / 翻译记忆挂到 system 侧，不进 user message。
+          translation?.systemAddendum ?? null
         );
         await Telemetry.sendTelemetry("sent_chat", {
           multiUserMode: multiUserMode(response),
@@ -173,7 +177,11 @@ function chatEndpoints(app) {
           thread,
           attachments,
           feature,
-          translation ? { translationMeta: translation.translationMeta } : null
+          translation ? { translationMeta: translation.translationMeta } : null,
+          // 落库用原文：存到数据库的 workspace_chats.prompt 必须是用户原始提问。
+          translation ? message : null,
+          // 术语表 / 翻译记忆挂到 system 侧，不进 user message。
+          translation?.systemAddendum ?? null
         );
 
         // If thread was renamed emit event to frontend via special `action` response.

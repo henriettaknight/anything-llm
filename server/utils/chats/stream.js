@@ -29,7 +29,15 @@ async function streamChatWithWorkspace(
   feature = null,
   // 调用方附加的自定义 metrics（如翻译的 translationMeta），
   // 会并入落库的 response.metrics 与 finalizeResponseStream 推送。
-  extraMetrics = null
+  extraMetrics = null,
+  // 落库到 workspace_chats.prompt 时使用的原文。
+  // 默认 null 时落库沿用 `message`；当调用方注入「增强 user prompt」
+  // 给 LLM 但希望落库仅保留用户原文时（例如翻译），传原始 message。
+  promptForStorage = null,
+  // 追加到 system prompt 尾部的动态检索增强段（例如翻译的术语表 + 翻译记忆）。
+  // 这类内容按原文动态抽取，不能写死进 workspace.openAiPrompt，
+  // 又不该污染 user message，因此挂在 system 侧。
+  systemAddendum = null
 ) {
   const uuid = uuidv4();
   const updatedMessage = await grepCommand(message, user);
@@ -93,7 +101,7 @@ async function streamChatWithWorkspace(
     });
     await WorkspaceChats.new({
       workspaceId: workspace.id,
-      prompt: message,
+      prompt: promptForStorage ?? message,
       response: {
         text: textResponse,
         sources: [],
@@ -230,7 +238,7 @@ async function streamChatWithWorkspace(
 
     await WorkspaceChats.new({
       workspaceId: workspace.id,
-      prompt: message,
+      prompt: promptForStorage ?? message,
       response: {
         text: textResponse,
         sources: [],
@@ -244,11 +252,19 @@ async function streamChatWithWorkspace(
     return;
   }
 
+  // 系统指令 = workspace.openAiPrompt（+ 用户名等原生拼装）；
+  // 翻译场景还会追加动态术语表 / 翻译记忆，让 user message 保持纯净原文。
+  const baseSystemPrompt = await chatPrompt(workspace, user);
+  const systemPrompt =
+    systemAddendum && systemAddendum.trim()
+      ? `${baseSystemPrompt}\n\n${systemAddendum.trim()}`
+      : baseSystemPrompt;
+
   // Compress & Assemble message to ensure prompt passes token limit with room for response
   // and build system messages based on inputs and history.
   const messages = await LLMConnector.compressMessages(
     {
-      systemPrompt: await chatPrompt(workspace, user),
+      systemPrompt,
       userPrompt: updatedMessage,
       contextTexts,
       chatHistory,
@@ -314,7 +330,7 @@ async function streamChatWithWorkspace(
   if (completeText?.length > 0) {
     const { chat } = await WorkspaceChats.new({
       workspaceId: workspace.id,
-      prompt: message,
+      prompt: promptForStorage ?? message,
       response: {
         text: completeText,
         sources,
