@@ -65,8 +65,14 @@ function chatEndpoints(app) {
         // 翻译 workspace：只做「术语抽取 + 翻译记忆检索」的增强，
         // 生成/流式/落库全部交回原生 streamChatWithWorkspace，
         // 从而自动适配 provider（ollama/openai/...）、享受统一思考开关与用量统计。
+        // 传入 workspace/user：原文可能以附件形式上传，需要把附件正文
+        // 一并纳入术语抽取与翻译记忆检索（否则附件场景命中数恒为 0）。
         const translation = isTranslationWorkspace(workspace)
-          ? await enhanceTranslationPrompt(message, glossaryIds)
+          ? await enhanceTranslationPrompt(message, glossaryIds, {
+              workspace,
+              thread: null,
+              user,
+            })
           : null;
 
         await streamChatWithWorkspace(
@@ -164,8 +170,14 @@ function chatEndpoints(app) {
 
         // 翻译 workspace：同上，只做检索增强；
         // thread 自动改名由下方原生逻辑统一处理（原本的 adapter 分支是重复实现）。
+        // 传入 workspace/thread/user：原文可能以附件形式上传，需要把附件正文
+        // 一并纳入术语抽取与翻译记忆检索（否则附件场景命中数恒为 0）。
         const translation = isTranslationWorkspace(workspace)
-          ? await enhanceTranslationPrompt(message, glossaryIds)
+          ? await enhanceTranslationPrompt(message, glossaryIds, {
+              workspace,
+              thread,
+              user,
+            })
           : null;
 
         await streamChatWithWorkspace(

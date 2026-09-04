@@ -6,6 +6,7 @@ const {
   trashFile,
   writeToServerDocuments,
 } = require("../../utils/files");
+const { decodeTextBuffer } = require("../../utils/encoding");
 const { default: slugify } = require("slugify");
 
 async function asTxt({
@@ -16,7 +17,15 @@ async function asTxt({
 }) {
   let content = "";
   try {
-    content = fs.readFileSync(fullFilePath, "utf8");
+    // 不能写死 utf8：中文 Windows 记事本默认保存为 GBK/GB18030，
+    // 按 UTF-8 读会整篇变成 U+FFFD 乱码，最终让模型报「Encoding Error」。
+    const decoded = decodeTextBuffer(fs.readFileSync(fullFilePath));
+    content = decoded.text;
+    if (decoded.encoding !== "utf-8") {
+      console.log(
+        `-- Detected ${decoded.encoding} (via ${decoded.via}) for ${filename} --`
+      );
+    }
   } catch (err) {
     console.error("Could not read file!", err);
   }

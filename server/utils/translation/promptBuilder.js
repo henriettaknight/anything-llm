@@ -54,16 +54,45 @@ function buildTranslationUserPrompt({ sourceText } = {}) {
  * 术语表与翻译记忆是**按原文动态抽取**的，不能写死进 workspace.openAiPrompt，
  * 因此每次请求时拼好、追加到系统指令尾部，让 user message 保持纯净。
  *
+ * 当用户把原文以**附件**形式上传时，正文并不在 user message 里，
+ * 而是被原生链路塞进系统 Context 的 `[CONTEXT n]` 段
+ * （见 server/utils/chats/stream.js 的 contextTexts → 各 provider 的 #appendContext）。
+ * 此时系统指令里的「请将用户输入的内容翻译」会与数据位置错位，
+ * 模型会把 [CONTEXT] 当参考资料，自行挑"正文"，进而：
+ *   - 跳过开头的分类 / 说明行（如「文本类型：…」「目的：…」）
+ *   - 行数与原文不一致，违反下面的格式硬性要求
+ * 因此必须显式告知模型原文的落脚点。
+ *
  * @param {Object} opts
  * @param {string} [opts.glossaryText] - Python wrapper 输出的 glossary 文本
  * @param {Array<{content: string, score: number, source: string}>} [opts.chunks=[]] - RAGFlow 检索片段
- * @returns {string} 无术语表且无翻译记忆时返回空字符串
+ * @param {number} [opts.attachmentCount=0] - 本次挂载的附件（待译原文）数量
+ * @returns {string} 无术语表且无翻译记忆且无附件时返回空字符串
  */
 function buildTranslationSystemAddendum({
   glossaryText,
   chunks = [],
+  attachmentCount = 0,
 } = {}) {
   const parts = [];
+
+  if (attachmentCount > 0) {
+    const ranges =
+      attachmentCount === 1
+        ? "[CONTEXT 0]"
+        : `[CONTEXT 0] ~ [CONTEXT ${attachmentCount - 1}]`;
+    parts.push(
+      [
+        "【待译原文的位置 - 必读】",
+        `用户以附件形式上传了待译原文，原文位于系统 Context 的 ${ranges} 中（不含 [END CONTEXT] 之类的标记行）。`,
+        "请把这些 [CONTEXT n] 的**全部内容**当作待译原文，逐行完整翻译：",
+        "- 开头的分类行与说明行（例如「文本类型：…」「目的：…」「等级：…」「位置：…」）同样属于原文，必须翻译，不得当作元信息或文档头跳过；",
+        "- 行数、行序与原文严格一致，不得合并或拆分段落；",
+        "- 用户输入框里的文字若只是指令（如「翻译」「请翻译为 English」），不要把它当作待译内容；",
+        "- 不要输出 [CONTEXT n] 这类标记，也不要复述原文。",
+      ].join("\n")
+    );
+  }
 
   if (glossaryText && glossaryText.trim()) {
     parts.push(`【术语表 - 必须严格遵守】\n${glossaryText.trim()}`);
