@@ -332,6 +332,7 @@ export default function ChatContainer({
           isStreaming={loadingResponse}
           sendCommand={sendCommand}
           attachments={files}
+          workspace={workspace}
         />
       </DnDFileUploaderWrapper>
       <ChatTooltips />

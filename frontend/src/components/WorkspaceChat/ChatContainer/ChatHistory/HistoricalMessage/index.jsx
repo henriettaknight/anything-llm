@@ -22,6 +22,8 @@ import paths from "@/utils/paths";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { chatQueryRefusalResponse } from "@/utils/chat";
+import CollapsibleText from "../CollapsibleText";
+import { isTranslationWorkspace } from "@/utils/translation/constants";
 
 const HistoricalMessage = ({
   uuid = v4(),
@@ -118,6 +120,7 @@ const HistoricalMessage = ({
                 role={role}
                 message={message}
                 expanded={isLastMessage}
+                workspace={workspace}
               />
               {isRefusalMessage && (
                 <Link
@@ -220,18 +223,28 @@ function ChatAttachments({ attachments = [] }) {
 }
 
 const RenderChatContent = memo(
-  ({ role, message, expanded = false }) => {
+  ({ role, message, expanded = false, workspace = null }) => {
     // If the message is not from the assistant, we can render it directly
     // as normal since the user cannot think (lol)
-    if (role !== "assistant")
+    if (role !== "assistant") {
+      const html = DOMPurify.sanitize(renderMarkdown(message));
+      // 翻译 workspace 的原文往往很长，默认折叠，避免一条消息占满整屏
+      if (isTranslationWorkspace(workspace)) {
+        return (
+          <CollapsibleText
+            html={html}
+            rawText={message || ""}
+            defaultExpanded={expanded}
+          />
+        );
+      }
       return (
         <span
           className="flex flex-col gap-y-1"
-          dangerouslySetInnerHTML={{
-            __html: DOMPurify.sanitize(renderMarkdown(message)),
-          }}
+          dangerouslySetInnerHTML={{ __html: html }}
         />
       );
+    }
     let thoughtChain = null;
     let msgToRender = message;
     if (!message) return null;
@@ -274,7 +287,8 @@ const RenderChatContent = memo(
     return (
       prevProps.role === nextProps.role &&
       prevProps.message === nextProps.message &&
-      prevProps.expanded === nextProps.expanded
+      prevProps.expanded === nextProps.expanded &&
+      prevProps.workspace?.slug === nextProps.workspace?.slug
     );
   }
 );

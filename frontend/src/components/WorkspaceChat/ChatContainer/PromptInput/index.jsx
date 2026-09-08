@@ -25,6 +25,11 @@ import useTextSize from "@/hooks/useTextSize";
 import { useTranslation } from "react-i18next";
 import Appearance from "@/models/appearance";
 import usePromptInputStorage from "@/hooks/usePromptInputStorage";
+import {
+  isTranslationWorkspace,
+  TRANSLATION_LONG_INPUT_LINES,
+  TRANSLATION_LONG_INPUT_CHARS,
+} from "@/utils/translation/constants";
 
 export const PROMPT_INPUT_ID = "primary-prompt-input";
 export const PROMPT_INPUT_EVENT = "set_prompt_input";
@@ -36,6 +41,7 @@ export default function PromptInput({
   isStreaming,
   sendCommand,
   attachments = [],
+  workspace = null,
 }) {
   const { t } = useTranslation();
   const { isDisabled } = useIsDisabled();
@@ -48,6 +54,29 @@ export default function PromptInput({
   const undoStack = useRef([]);
   const redoStack = useRef([]);
   const { textSizeClass } = useTextSize();
+
+  // 翻译 workspace 的原文往往是一整篇文档，粘贴进来会把输入区撑满并挤掉历史。
+  // 失焦时自动折叠成一行摘要，聚焦时恢复编辑，不打断输入。
+  const isTranslation = isTranslationWorkspace(workspace);
+  const [inputCollapsed, setInputCollapsed] = useState(false);
+  const charCount = promptInput.length;
+  const lineCount = promptInput ? promptInput.split("\n").length : 0;
+  const isLongInput =
+    isTranslation &&
+    (lineCount > TRANSLATION_LONG_INPUT_LINES ||
+      charCount > TRANSLATION_LONG_INPUT_CHARS);
+  const showCollapsed = isLongInput && inputCollapsed;
+
+  useEffect(() => {
+    if (!textareaRef.current) return;
+    if (showCollapsed) textareaRef.current.style.height = "40px";
+    else adjustTextArea({ target: textareaRef.current });
+  }, [showCollapsed]);
+
+  function expandInput() {
+    setInputCollapsed(false);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
 
   // Synchronizes prompt input value with localStorage, scoped to the current thread.
   usePromptInputStorage({
@@ -271,6 +300,46 @@ export default function PromptInput({
         <div className="flex items-center rounded-lg md:mb-0 md:w-full">
           <div className="w-[95vw] md:w-[635px] bg-theme-bg-chat-input light:bg-white light:border-solid light:border-[1px] light:border-theme-chat-input-border shadow-sm rounded-2xl pwa:rounded-3xl flex flex-col px-2 overflow-hidden">
             <AttachmentManager attachments={attachments} />
+            {isLongInput && (
+              <div className="mx-3 mt-2 flex items-center gap-x-2 rounded-lg border border-theme-chat-input-border px-3 py-2 text-xs text-theme-text-secondary">
+                {showCollapsed ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={expandInput}
+                      className="flex-1 truncate text-left hover:text-theme-text-primary"
+                    >
+                      {promptInput.replace(/\s+/g, " ").slice(0, 60) ||
+                        "（空）"}
+                      {promptInput.replace(/\s+/g, " ").length > 60 ? "…" : ""}
+                    </button>
+                    <span className="shrink-0 whitespace-nowrap">
+                      {charCount} 字 · {lineCount} 行
+                    </span>
+                    <button
+                      type="button"
+                      onClick={expandInput}
+                      className="shrink-0 whitespace-nowrap text-theme-text-primary hover:opacity-70"
+                    >
+                      展开编辑
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex-1 truncate">
+                      已输入 {charCount} 字 · {lineCount} 行
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setInputCollapsed(true)}
+                      className="shrink-0 whitespace-nowrap text-theme-text-primary hover:opacity-70"
+                    >
+                      折叠
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             <div className="flex items-center border-b border-theme-chat-input-border mx-3">
               <textarea
                 id={PROMPT_INPUT_ID}
@@ -282,14 +351,20 @@ export default function PromptInput({
                   handlePasteEvent(e);
                 }}
                 required={true}
-                onFocus={() => setFocused(true)}
+                onFocus={() => {
+                  setFocused(true);
+                  setInputCollapsed(false);
+                }}
                 onBlur={(e) => {
                   setFocused(false);
                   adjustTextArea(e);
+                  if (isLongInput) setInputCollapsed(true);
                 }}
                 value={promptInput}
                 spellCheck={Appearance.get("enableSpellCheck")}
-                className={`border-none cursor-text max-h-[50vh] md:max-h-[350px] md:min-h-[40px] mx-2 md:mx-0 pt-[12px] w-full leading-5 text-white bg-transparent placeholder:text-white/60 light:placeholder:text-theme-text-primary resize-none active:outline-none focus:outline-none flex-grow mb-1 pwa:!text-[16px] ${textSizeClass}`}
+                className={`border-none cursor-text max-h-[50vh] md:max-h-[350px] md:min-h-[40px] mx-2 md:mx-0 pt-[12px] w-full leading-5 text-white bg-transparent placeholder:text-white/60 light:placeholder:text-theme-text-primary resize-none active:outline-none focus:outline-none flex-grow mb-1 pwa:!text-[16px] ${textSizeClass}${
+                  showCollapsed ? " overflow-hidden" : ""
+                }`}
                 placeholder={t("chat_window.send_message")}
               />
               {isStreaming ? (
