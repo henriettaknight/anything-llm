@@ -41,15 +41,17 @@ function translationEndpoints(app) {
   });
 
   // 确保当前用户存在翻译 workspace，返回 slug 供前端跳转
-  // GET /translation/ensure-workspace
+  // GET /translation/ensure-workspace              → 默认创建"智能翻译"
+  // GET /translation/ensure-workspace?name=智能翻译测试 → 创建"智能翻译测试"
   app.get(
     "/translation/ensure-workspace",
     [validatedRequest],
     async (req, response) => {
       const user = await userFromSession(req, response);
       if (!user) return;
+      const workspaceName = req.query.name || "智能翻译";
       try {
-        const workspace = await ensureTranslationWorkspace(user);
+        const workspace = await ensureTranslationWorkspace(user, workspaceName);
         if (!workspace) {
           response
             .status(500)

@@ -2,19 +2,24 @@
 //
 // 翻译 workspace 识别常量（前端版本，与 server/utils/translation/constants.js 保持一致）。
 // 零 schema 改动：不新增 workspace.type 字段，以显示名 + slug 规则作为识别开关。
+//
+// 架构变更（2026-09-09）：
+//   翻译 workspace 不再按用户隔离，所有用户共享同一个翻译 workspace。
+//   支持两个翻译 workspace："智能翻译"(slug=translation) + "智能翻译测试"(slug=translation-test)。
 
-export const TRANSLATION_WORKSPACE_NAME = "智能翻译";
-export const TRANSLATION_WORKSPACE_SLUG_PREFIX = "translation-";
+/** 翻译 workspace 显示名（多个，均为翻译 workspace） */
+export const TRANSLATION_WORKSPACE_NAMES = ["智能翻译", "智能翻译测试"];
 
-/**
- * 自动创建的每用户翻译 workspace：translation-{userId}（userId 为数字）。
- *
- * ⚠️ 必须与 server/utils/translation/constants.js 的正则**完全一致**。
- * 不能用 startsWith('translation-') 前缀匹配：服务器上存在历史 workspace
- * 「翻译助手」（slug = translation-assistant），前缀匹配会把它误判为翻译 workspace，
- * 导致术语选择器、长文本折叠等翻译专属 UI 被错误套用到普通 workspace 上。
- */
-export const TRANSLATION_WORKSPACE_SLUG_PATTERN = /^translation-\d+$/;
+/** 翻译 workspace 固定 slug 映射 */
+export const TRANSLATION_WORKSPACE_SLUGS = {
+  智能翻译: "translation",
+  智能翻译测试: "translation-test",
+};
+
+/** slug 集合（用于 isTranslationWorkspace 的 slug 匹配） */
+export const TRANSLATION_WORKSPACE_SLUG_SET = new Set(
+  Object.values(TRANSLATION_WORKSPACE_SLUGS)
+);
 
 /** 输入框长文本阈值：超过即进入「可折叠」状态（行数或字符数任一超出）。 */
 export const TRANSLATION_LONG_INPUT_LINES = 8;
@@ -30,16 +35,6 @@ export const TRANSLATION_COLLAPSED_MAX_HEIGHT = 240;
  */
 export function isTranslationWorkspace(ws) {
   if (!ws) return false;
-  if (ws.name === TRANSLATION_WORKSPACE_NAME) return true;
-  return TRANSLATION_WORKSPACE_SLUG_PATTERN.test(ws.slug || "");
-}
-
-/**
- * 根据用户 ID 生成翻译 workspace 的 slug。
- * 多用户模式下每个用户独立一个翻译 workspace，避免 slug 全局唯一冲突。
- * @param {number|string} userId
- * @returns {string}
- */
-export function translationSlugForUser(userId) {
-  return `${TRANSLATION_WORKSPACE_SLUG_PREFIX}${userId}`;
+  if (TRANSLATION_WORKSPACE_NAMES.includes(ws.name)) return true;
+  return TRANSLATION_WORKSPACE_SLUG_SET.has(ws.slug);
 }

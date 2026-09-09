@@ -27,9 +27,11 @@ export async function listGlossaries() {
 
 /**
  * 确保当前用户存在翻译 workspace，返回 { slug, name }
+ * @param {string} [workspaceName="智能翻译"] - 指定创建哪个翻译 workspace
  */
-export async function ensureWorkspace() {
-  const resp = await fetch(`${BASE}/ensure-workspace`, {
+export async function ensureWorkspace(workspaceName = "智能翻译") {
+  const params = new URLSearchParams({ name: workspaceName });
+  const resp = await fetch(`${BASE}/ensure-workspace?${params}`, {
     headers: authHeaders(),
   });
   if (!resp.ok) throw new Error(`ensureWorkspace HTTP ${resp.status}`);

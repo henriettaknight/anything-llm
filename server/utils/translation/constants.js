@@ -3,23 +3,32 @@
 // 翻译 workspace 识别常量。
 // 零 schema 改动：不新增 workspace.type 字段，以显示名 + slug 规则作为识别开关。
 //
-// slug 策略（多用户模式）：
-//   每个用户独立翻译 workspace，slug = `translation-{userId}`，避免全局唯一冲突。
+// 架构变更（2026-09-09）：
+//   翻译 workspace 不再按用户隔离，所有用户共享同一个翻译 workspace。
+//   支持两个翻译 workspace："智能翻译"(slug=translation) + "智能翻译测试"(slug=translation-test)。
 //
-// ⚠️ slug 必须**严格匹配** `translation-{数字}`，不能用 startsWith 前缀匹配：
-//   服务器上存在历史 workspace「翻译助手」（slug = `translation-assistant`），
-//   前缀匹配会把它误判为翻译 workspace，导致术语注入、关闭思考等翻译逻辑被错误套用。
+// ⚠️ slug 用固定值（不再拼接 userId），用 Set 精确匹配，不用正则前缀匹配：
+//   避免误伤 `translation-assistant` 这类历史 workspace。
 
-const TRANSLATION_WORKSPACE_NAME = "智能翻译";
-const TRANSLATION_WORKSPACE_SLUG_PREFIX = "translation-";
-/** 自动创建的每用户翻译 workspace：translation-{userId}（userId 为数字） */
-const TRANSLATION_WORKSPACE_SLUG_PATTERN = /^translation-\d+$/;
+/** 翻译 workspace 显示名（多个，均为翻译 workspace） */
+const TRANSLATION_WORKSPACE_NAMES = ["智能翻译", "智能翻译测试"];
+
+/** 翻译 workspace 固定 slug 映射 */
+const TRANSLATION_WORKSPACE_SLUGS = {
+  智能翻译: "translation",
+  智能翻译测试: "translation-test",
+};
+
+/** slug 集合（用于 isTranslationWorkspace 的 slug 匹配） */
+const TRANSLATION_WORKSPACE_SLUG_SET = new Set(
+  Object.values(TRANSLATION_WORKSPACE_SLUGS)
+);
 
 /**
  * 判断 workspace 是否为翻译 workspace。
  * 命中条件（任一）：
- *   1. name 等于中文显示名「智能翻译」
- *   2. slug 严格匹配 `translation-{userId}`
+ *   1. name 在 TRANSLATION_WORKSPACE_NAMES 中
+ *   2. slug 在 TRANSLATION_WORKSPACE_SLUG_SET 中
  *
  * 注意：刻意不用 `slug.startsWith('translation-')`，避免误伤
  * `translation-assistant` 这类历史 workspace（它们不是新翻译体系管理的对象）。
@@ -28,13 +37,13 @@ const TRANSLATION_WORKSPACE_SLUG_PATTERN = /^translation-\d+$/;
  */
 function isTranslationWorkspace(ws) {
   if (!ws) return false;
-  if (ws.name === TRANSLATION_WORKSPACE_NAME) return true;
-  return TRANSLATION_WORKSPACE_SLUG_PATTERN.test(ws.slug || "");
+  if (TRANSLATION_WORKSPACE_NAMES.includes(ws.name)) return true;
+  return TRANSLATION_WORKSPACE_SLUG_SET.has(ws.slug);
 }
 
 module.exports = {
-  TRANSLATION_WORKSPACE_NAME,
-  TRANSLATION_WORKSPACE_SLUG_PREFIX,
-  TRANSLATION_WORKSPACE_SLUG_PATTERN,
+  TRANSLATION_WORKSPACE_NAMES,
+  TRANSLATION_WORKSPACE_SLUGS,
+  TRANSLATION_WORKSPACE_SLUG_SET,
   isTranslationWorkspace,
 };
