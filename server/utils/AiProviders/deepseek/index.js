@@ -64,8 +64,19 @@ class DeepSeekLLM {
   }
 
   async isValidChatCompletionModel(modelName = "") {
-    const models = await this.openai.models.list().catch(() => ({ data: [] }));
-    return models.data.some((model) => model.id === modelName);
+    try {
+      const models = await this.openai.models.list();
+      // If the live list contains the model, it is definitely valid.
+      if (models?.data?.some((model) => model.id === modelName)) return true;
+    } catch {
+      // If we cannot reach the model list, fall through and let the real
+      // chat completion request decide validity.
+    }
+    // DeepSeek's /models endpoint does not enumerate newer or custom model
+    // names (e.g. deepseek-v4-flash), so its absence here is not conclusive.
+    // Allow the request to proceed; the API will surface a proper error if
+    // the model is genuinely invalid.
+    return true;
   }
 
   constructPrompt({
@@ -86,17 +97,37 @@ class DeepSeekLLM {
    * @param {Object} response
    * @returns {string}
    */
-  #parseReasoningFromResponse({ message }) {
-    let textResponse = message?.content;
+  #parseReasoningFromResponse({ message }, think = true) {
+    const textResponse = message?.content;
     if (
+      think &&
       !!message?.reasoning_content &&
       message.reasoning_content.trim().length > 0
     )
-      textResponse = `<think>${message.reasoning_content}</think>${textResponse}`;
+      return `<think>${message.reasoning_content}</think>${textResponse}`;
     return textResponse;
   }
 
-  async getChatCompletion(messages = null, { temperature = 0.7 }) {
+  /**
+   * Resolves the actual model id to use for a chat completion.
+   *
+   * Reasoning models behind the OpenAI-compatible endpoint cannot disable
+   * reasoning through request parameters (verified: reasoning:false /
+   * thinking:false / enable_thinking:false etc. are all ignored and the model
+   * still streams reasoning_content). The only reliable "no-thinking" fast path
+   * is to route the request to a separate non-reasoning model, configured via
+   * DEEPSEEK_THINK_OFF_MODEL. When that env is unset, behavior is unchanged.
+   * @param {boolean} think
+   * @returns {string}
+   */
+  #modelForThink(think = true) {
+    if (!think && !!process.env.DEEPSEEK_THINK_OFF_MODEL) {
+      return process.env.DEEPSEEK_THINK_OFF_MODEL;
+    }
+    return this.model;
+  }
+
+  async getChatCompletion(messages = null, { temperature = 0.7, think = true } = {}) {
     if (!(await this.isValidChatCompletionModel(this.model)))
       throw new Error(
         `DeepSeek chat: ${this.model} is not valid for chat completion!`
@@ -105,7 +136,7 @@ class DeepSeekLLM {
     const result = await LLMPerformanceMonitor.measureAsyncFunction(
       this.openai.chat.completions
         .create({
-          model: this.model,
+          model: this.#modelForThink(think),
           messages,
           temperature,
         })
@@ -123,7 +154,7 @@ class DeepSeekLLM {
       );
 
     return {
-      textResponse: this.#parseReasoningFromResponse(result.output.choices[0]),
+      textResponse: this.#parseReasoningFromResponse(result.output.choices[0], think),
       metrics: {
         prompt_tokens: result.output.usage.prompt_tokens || 0,
         completion_tokens: result.output.usage.completion_tokens || 0,
@@ -134,7 +165,7 @@ class DeepSeekLLM {
     };
   }
 
-  async streamGetChatCompletion(messages = null, { temperature = 0.7 }) {
+  async streamGetChatCompletion(messages = null, { temperature = 0.7, think = true } = {}) {
     if (!(await this.isValidChatCompletionModel(this.model)))
       throw new Error(
         `DeepSeek chat: ${this.model} is not valid for chat completion!`
@@ -142,7 +173,7 @@ class DeepSeekLLM {
 
     const measuredStreamRequest = await LLMPerformanceMonitor.measureStream(
       this.openai.chat.completions.create({
-        model: this.model,
+        model: this.#modelForThink(think),
         stream: true,
         messages,
         temperature,
@@ -158,7 +189,7 @@ class DeepSeekLLM {
   // to specifically handle the DeepSeek reasoning model `reasoning_content` field.
   // When or if ever possible, we should refactor this to be in the generic function.
   handleStream(response, stream, responseProps) {
-    const { uuid = uuidv4(), sources = [] } = responseProps;
+    const { uuid = uuidv4(), sources = [], think = true } = responseProps;
     let hasUsageMetrics = false;
     let usage = {
       completion_tokens: 0,
@@ -200,7 +231,8 @@ class DeepSeekLLM {
           }
 
           // Reasoning models will always return the reasoning text before the token text.
-          if (reasoningToken) {
+          // Only surface it when thinking is enabled; otherwise stream only the final content.
+          if (think && reasoningToken) {
             // If the reasoning text is empty (''), we need to initialize it
             // and send the first chunk of reasoning text.
             if (reasoningText.length === 0) {
@@ -229,7 +261,7 @@ class DeepSeekLLM {
 
           // If the reasoning text is not empty, but the reasoning token is empty
           // and the token text is not empty we need to close the reasoning text and begin sending the token text.
-          if (!!reasoningText && !reasoningToken && token) {
+          if (think && !!reasoningText && !reasoningToken && token) {
             writeResponseChunk(response, {
               uuid,
               sources: [],

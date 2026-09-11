@@ -38,6 +38,7 @@ const { purgeDocument } = require("../utils/files/purgeDocument");
 const { getModelTag } = require("./utils");
 const { searchWorkspaceAndThreads } = require("../utils/helpers/search");
 const { workspaceParsedFilesEndpoints } = require("./workspacesParsedFiles");
+const { isTranslationWorkspace } = require("../utils/translation/constants");
 
 function workspaceEndpoints(app) {
   if (!app) return;
@@ -107,6 +108,42 @@ function workspaceEndpoints(app) {
         response.status(200).json({ workspace, message });
       } catch (e) {
         console.error(e.message, e);
+        response.sendStatus(500).end();
+      }
+    }
+  );
+
+  // 翻译 workspace 专用：所有角色可切换翻译模型，仅允许 chatProvider + chatModel
+  app.post(
+    "/workspace/:slug/update-translation-model",
+    [validatedRequest, flexUserRoleValid([ROLES.all])],
+    async (request, response) => {
+      try {
+        const { slug = null } = request.params;
+        const { chatProvider, chatModel } = reqBody(request);
+        const currWorkspace = await Workspace.get({ slug });
+
+        if (!currWorkspace) {
+          response.sendStatus(400).end();
+          return;
+        }
+
+        if (!isTranslationWorkspace(currWorkspace)) {
+          response.sendStatus(403).end();
+          return;
+        }
+
+        const updates = {};
+        if (chatProvider !== undefined) updates.chatProvider = chatProvider;
+        if (chatModel !== undefined) updates.chatModel = chatModel;
+
+        const { workspace, message } = await Workspace.update(
+          currWorkspace.id,
+          updates
+        );
+        response.status(200).json({ workspace, message });
+      } catch (e) {
+        console.error("update-translation-model error:", e);
         response.sendStatus(500).end();
       }
     }

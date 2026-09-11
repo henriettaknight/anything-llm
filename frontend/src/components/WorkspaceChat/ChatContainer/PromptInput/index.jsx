@@ -12,6 +12,7 @@ import AvailableAgentsButton, {
 } from "./AgentMenu";
 import TextSizeButton from "./TextSizeMenu";
 import LLMSelectorAction from "./LLMSelector/action";
+import TranslationModelSelector from "./TranslationModelSelector";
 import SpeechToText from "./SpeechToText";
 import { Tooltip } from "react-tooltip";
 import AttachmentManager from "./Attachments";
@@ -412,7 +413,11 @@ export default function PromptInput({
                   setShowAgents={setShowAgents}
                 />
                 <TextSizeButton />
-                <LLMSelectorAction />
+                {isTranslation ? (
+                  <TranslationModelSelector workspace={workspace} />
+                ) : (
+                  <LLMSelectorAction />
+                )}
               </div>
               <div className="flex gap-x-2">
                 <SpeechToText sendCommand={sendCommand} />

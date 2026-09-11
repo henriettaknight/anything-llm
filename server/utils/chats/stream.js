@@ -306,6 +306,7 @@ async function streamChatWithWorkspace(
     completeText = await LLMConnector.handleStream(response, stream, {
       uuid,
       sources,
+      think,
     });
     metrics = stream.metrics;
   }

@@ -592,6 +592,16 @@ async function getDeepSeekModels(apiKey = null) {
           name: "deepseek-reasoner",
           organization: "deepseek",
         },
+        {
+          id: "deepseek-v4-flash",
+          name: "deepseek-v4-flash",
+          organization: "deepseek",
+        },
+        {
+          id: "deepseek-v4-pro",
+          name: "deepseek-v4-pro",
+          organization: "deepseek",
+        },
       ];
     });
 
