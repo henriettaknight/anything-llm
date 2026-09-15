@@ -328,6 +328,17 @@ function TranslationMetaBar({ metrics = {} }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("hits"); // 'hits' | 'chunks'
 
+  // 悬停需停留 HOVER_DELAY_MS 才打开面板，避免鼠标无意划过时误开；
+  // 离开/切换目标会取消计时；点击仍然立即打开。
+  const HOVER_DELAY_MS = 500;
+  const hoverTimerRef = useRef(null);
+  const openPanelDelayed = (tab) => {
+    clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => openPanel(tab), HOVER_DELAY_MS);
+  };
+  const cancelHoverOpen = () => clearTimeout(hoverTimerRef.current);
+  useEffect(() => () => clearTimeout(hoverTimerRef.current), []);
+
   const openPanel = (tab) => {
     setActiveTab(tab);
     setPanelOpen(true);
@@ -342,16 +353,24 @@ function TranslationMetaBar({ metrics = {} }) {
         </span>
         <button
           type="button"
-          onMouseEnter={() => openPanel("hits")}
-          onClick={() => openPanel("hits")}
+          onMouseEnter={() => openPanelDelayed("hits")}
+          onMouseLeave={cancelHoverOpen}
+          onClick={() => {
+            cancelHoverOpen();
+            openPanel("hits");
+          }}
           className="underline decoration-dotted underline-offset-2 hover:text-theme-text-primary"
         >
           命中术语：<span className="text-theme-text-primary">{hitCount}</span> 条
         </button>
         <button
           type="button"
-          onMouseEnter={() => openPanel("chunks")}
-          onClick={() => openPanel("chunks")}
+          onMouseEnter={() => openPanelDelayed("chunks")}
+          onMouseLeave={cancelHoverOpen}
+          onClick={() => {
+            cancelHoverOpen();
+            openPanel("chunks");
+          }}
           className="underline decoration-dotted underline-offset-2 hover:text-theme-text-primary"
         >
           检索片段：<span className="text-theme-text-primary">{retrievalCount}</span> 段

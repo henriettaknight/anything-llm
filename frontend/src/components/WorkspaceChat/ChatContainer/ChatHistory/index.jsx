@@ -44,9 +44,32 @@ export default function ChatHistory({
     }
   }, [history, isAtBottom, isStreaming, isUserScrolling]);
 
+  // NEW: The effect above never fires when the user had scrolled up to read
+  // (isUserScrolling sticks true) — so submitting a new message would not
+  // scroll to it and they had to scroll down manually. This standalone effect
+  // only watches `history`: on submit, the user message AND the assistant
+  // placeholder are appended TOGETHER (see handleSubmit in ChatContainer), so
+  // the last entry is always "assistant" — we must check the FIRST newly
+  // appended entry instead. Clear the sticky flag and scroll once; the
+  // original effect then keeps auto-following the streamed reply.
+  const prevHistoryLenRef = useRef(history.length);
+  useEffect(() => {
+    const prevLen = prevHistoryLenRef.current;
+    prevHistoryLenRef.current = history.length;
+    if (history.length > prevLen && history[prevLen]?.role === "user") {
+      setIsUserScrolling(false);
+      requestAnimationFrame(() => scrollToBottom(false));
+    }
+  }, [history]);
+
   const handleScroll = (e) => {
     const { scrollTop, scrollHeight, clientHeight } = e.target;
-    const isBottom = scrollHeight - scrollTop === clientHeight;
+    // Tolerance instead of exact equality: under browser zoom / DPI scaling
+    // scrollHeight - scrollTop can differ from clientHeight by a fractional
+    // pixel, which made the exact check report "not at bottom" forever —
+    // re-sticking isUserScrolling after our programmatic scrollToBottom and
+    // wrongly showing the scroll-to-bottom arrow.
+    const isBottom = scrollHeight - scrollTop - clientHeight < 4;
 
     // Detect if this is a user-initiated scroll
     if (Math.abs(scrollTop - lastScrollTopRef.current) > 10) {

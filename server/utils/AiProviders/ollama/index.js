@@ -219,10 +219,16 @@ class OllamaAILLM {
    * @param {Error} e
    */
   #errorHandler(e) {
-    switch (e.message) {
-      case "fetch failed":
+    switch (true) {
+      case e.message === "fetch failed":
         throw new Error(
           "Your Ollama instance could not be reached or is not responding. Please make sure it is running the API server and your connection information is correct in AnythingLLM."
+        );
+      // gemma4-31b 等非视觉模型收到图片输入时，Ollama 直接 500 拒绝。
+      // 原始报错技术性强，这里改写为可操作的中文提示。
+      case e.message.includes("missing data required for image input"):
+        throw new Error(
+          `当前模型 ${this.model} 不支持图片输入，请切换到支持视觉的模型（如 Gemma4-26B 或 DeepSeek v4-flash）后重试。原始错误: ${e.message}`
         );
       default:
         return e;

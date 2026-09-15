@@ -7,6 +7,7 @@ const { MODEL_MAP } = require("../modelMap");
 const {
   writeResponseChunk,
   clientAbortedHandler,
+  formatChatHistory,
 } = require("../../helpers/chat/responses");
 
 class DeepSeekLLM {
@@ -79,17 +80,49 @@ class DeepSeekLLM {
     return true;
   }
 
+  /**
+   * Generates the multimodal content for a message + attachments.
+   * Mirrors genericOpenAi: OpenAI-compatible `image_url` content array with
+   * the full data: URL. When no attachments are present we return the plain
+   * string prompt to keep the legacy request shape unchanged (safer for
+   * backends with mixed content-array support).
+   * @param {{userPrompt: string, attachments: import("../../helpers").Attachment[]}}
+   * @returns {string|Array<{type: string, text?: string, image_url?: {url: string, detail: string}}>}
+   */
+  #generateContent({ userPrompt, attachments = [] }) {
+    if (!attachments.length) return userPrompt;
+    const content = [{ type: "text", text: userPrompt }];
+    for (const attachment of attachments) {
+      content.push({
+        type: "image_url",
+        image_url: {
+          url: attachment.contentString,
+          detail: "high",
+        },
+      });
+    }
+    return content;
+  }
+
   constructPrompt({
     systemPrompt = "",
     contextTexts = [],
     chatHistory = [],
     userPrompt = "",
+    attachments = [],
   }) {
     const prompt = {
       role: "system",
       content: `${systemPrompt}${this.#appendContext(contextTexts)}`,
     };
-    return [prompt, ...chatHistory, { role: "user", content: userPrompt }];
+    return [
+      prompt,
+      ...formatChatHistory(chatHistory, this.#generateContent),
+      {
+        role: "user",
+        content: this.#generateContent({ userPrompt, attachments }),
+      },
+    ];
   }
 
   /**
