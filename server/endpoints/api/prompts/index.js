@@ -16,6 +16,7 @@ function apiPromptsEndpoints(router) {
   // 每个 type → 多个 prompt 文件（按顺序拼接，用分隔注释隔开）
   const PROMPT_FILES = {
     ue_cpp:       ['ue5_cpp_prompt.md'],
+    ue4_cpp:      ['ue4_cpp_prompt.md'],
     ue_blueprint: ['ue5_blueprint_prompt.md'],
     cpp:          ['cpp_prompt.md'],
     ts:           ['ts_prompt.md'],

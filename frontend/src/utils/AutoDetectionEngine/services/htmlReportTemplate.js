@@ -283,6 +283,7 @@ function getStyles() {
 const CATEGORY_COLUMNS = {
   cpp: ['AUTO', 'CLASS', 'DEPR', 'LEAK', 'MEMF', 'OSRES', 'PERF', 'STL'],
   ue_cpp: ['AUTO', 'CLASS', 'DEPR', 'LEAK', 'MEMF', 'OSRES', 'PERF', 'STL'],
+  ue4_cpp: ['AUTO', 'CLASS', 'DEPR', 'LEAK', 'MEMF', 'OSRES', 'PERF', 'STL'],
   ue_blueprint: ['NULL', 'TICK', 'LOOP', 'EVENT', 'CAST', 'REF', 'REPLICATE', 'INTERFACE', 'RESOURCE', 'INIT', 'ANIM', 'UI', 'COMPILE'],
   ts: ['TYPE', 'REACT', 'ASYNC', 'STATE', 'LEAK', 'SECURITY', 'NULL', 'PERF', 'ERR', 'LOGIC', 'TAURI', 'I18N', 'DEP', 'ARCH'],
   ts_famegame: ['TYPE', 'REACT', 'ASYNC', 'STATE', 'LEAK', 'SECURITY', 'NULL', 'PERF', 'ERR', 'LOGIC', 'TAURI', 'I18N', 'DEP', 'ARCH'],

@@ -110,8 +110,8 @@ export function getServerLog() {
  */
 export async function getUEDefectDetectionPrompt(projectType) {
   // Validate projectType
-  if (!projectType || !['ue_cpp', 'ue_blueprint', 'cpp', 'ts', 'ts_famegame'].includes(projectType)) {
-    throw new Error(`Invalid project type: ${projectType}. Must be 'ue_cpp', 'ue_blueprint', 'cpp', 'ts' or 'ts_famegame'`);
+  if (!projectType || !['ue_cpp', 'ue4_cpp', 'ue_blueprint', 'cpp', 'ts', 'ts_famegame'].includes(projectType)) {
+    throw new Error(`Invalid project type: ${projectType}. Must be 'ue_cpp', 'ue4_cpp', 'ue_blueprint', 'cpp', 'ts' or 'ts_famegame'`);
   }
 
   try {
@@ -127,9 +127,11 @@ export async function getUEDefectDetectionPrompt(projectType) {
         ? (userLang === 'zh' ? 'cpp_prompt.md' : 'cpp_prompt_en.md')
         : (projectType === 'ts' || projectType === 'ts_famegame')
           ? 'ts_prompt.md (+ ts_contexts/famegame.md + _tauri.md)'
-          : projectType === 'ue_cpp' 
+          : projectType === 'ue_cpp'
             ? (userLang === 'zh' ? 'ue5_cpp_prompt.md' : 'ue5_cpp_prompt_en.md')
-            : (userLang === 'zh' ? 'ue5_blueprint_prompt.md' : 'ue5_blueprint_prompt_en.md');
+            : projectType === 'ue4_cpp'
+              ? 'ue4_cpp_prompt.md'
+              : (userLang === 'zh' ? 'ue5_blueprint_prompt.md' : 'ue5_blueprint_prompt_en.md');
       serverLog?.info(`✓ 成功从 API 获取提示词，长度: ${prompt.length} 字符`);
       serverLog?.info(`✓ 提示词来源: ${promptFile} 文件`);
       return prompt;
@@ -323,7 +325,7 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
 
     // If it's a .h file, try to find corresponding .cpp file (only for C++ projects)
     let pairedFile = null;
-    if (['ue_cpp', 'cpp'].includes(projectType) && fileInfo.name.endsWith('.h') && directoryHandle) {
+    if (['ue_cpp', 'ue4_cpp', 'cpp'].includes(projectType) && fileInfo.name.endsWith('.h') && directoryHandle) {
       pairedFile = await findPairedImplementationFile(fileInfo, directoryHandle);
     }
 
@@ -370,7 +372,7 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
 
         // 反向配对头文件（仅作声明骨架来源）；.h 自身检测时无需反向配对。
         let headerRef = null;
-        if (!isHeader && ['ue_cpp', 'cpp'].includes(projectType) && /\.(cpp|cc|cxx)$/i.test(fileInfo.name) && directoryHandle) {
+        if (!isHeader && ['ue_cpp', 'ue4_cpp', 'cpp'].includes(projectType) && /\.(cpp|cc|cxx)$/i.test(fileInfo.name) && directoryHandle) {
           headerRef = await findPairedHeaderFile(fileInfo, directoryHandle);
         }
 
@@ -1768,7 +1770,7 @@ export async function detectDefectsInFiles(files, directoryHandle, onProgress, p
     summary: (projectType === 'ts' || projectType === 'ts_famegame') ? {
       type: 0, react: 0, async: 0, state: 0, leak: 0, security: 0, null: 0,
       perf: 0, err: 0, logic: 0, tauri: 0, i18n: 0, dep: 0, arch: 0,
-    } : (projectType === 'ue_cpp' || projectType === 'cpp') ? {
+    } : (projectType === 'ue_cpp' || projectType === 'ue4_cpp' || projectType === 'cpp') ? {
       auto: 0,
       array: 0,
       memf: 0,

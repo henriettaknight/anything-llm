@@ -315,6 +315,9 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
             <option value="ue_cpp">
               {t("autodetection.config.projectType.ueCpp", "UE5 C++ Project")}
             </option>
+            <option value="ue4_cpp">
+              {t("autodetection.config.projectType.ue4Cpp", "UE4 C++ Project")}
+            </option>
             <option value="ue_blueprint">
               {t("autodetection.config.projectType.ueBlueprint", "UE5 Blueprint Project")}
             </option>
