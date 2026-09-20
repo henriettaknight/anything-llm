@@ -5,7 +5,7 @@
  */
 
 const CONFIG_STORAGE_KEY = 'autoDetection_config';
-const CONFIG_VERSION = '1.0.0';
+const CONFIG_VERSION = '1.1.0';
 
 /**
  * Default configuration values
@@ -29,6 +29,15 @@ const DEFAULT_CONFIG = {
   retryAttempts: 3,
   aiProvider: null,
   notificationEnabled: true,
+  // ===== 报告单元化（分阶段检测报告，doc/分阶段检测报告方案.md §2/§4#6）=====
+  // 单元拆分阈值（KB）：同组文件累计大小超过即切分为新报告单元（a1/a2/root1…）
+  // 0 = 不拆分（退化为旧行为，一组一份报告）。取值依据：实测 2.9MB 项目跑 14h
+  // （≈4.8h/MB），256KB ≈ 每小时出一个阶段包
+  reportUnitSizeThresholdKB: 256,
+  // 阶段下载开关：每单元完成即下载 report_<ts>_<unit>.zip 小包（关闭则只出最终完整包）
+  stageDownloadEnabled: true,
+  // 文件数兜底：单元内文件数超过该值强制切分（防小文件堆积撑爆单元 xlsx 行数）
+  maxFilesPerUnit: 200,
   createdAt: null,
   updatedAt: null
 };
@@ -177,6 +186,30 @@ class ConfigStorage {
       return false;
     }
 
+    // 报告单元化新字段（可选：旧配置经 migrate 补默认值，此处存在才校验）
+    if (
+      'reportUnitSizeThresholdKB' in config &&
+      (typeof config.reportUnitSizeThresholdKB !== 'number' ||
+        config.reportUnitSizeThresholdKB < 0 || config.reportUnitSizeThresholdKB > 102400)
+    ) {
+      console.warn('reportUnitSizeThresholdKB must be number between 0 and 102400 (KB)');
+      return false;
+    }
+
+    if ('stageDownloadEnabled' in config && typeof config.stageDownloadEnabled !== 'boolean') {
+      console.warn('stageDownloadEnabled must be boolean');
+      return false;
+    }
+
+    if (
+      'maxFilesPerUnit' in config &&
+      (typeof config.maxFilesPerUnit !== 'number' ||
+        config.maxFilesPerUnit < 1 || config.maxFilesPerUnit > 10000)
+    ) {
+      console.warn('maxFilesPerUnit must be number between 1 and 10000');
+      return false;
+    }
+
     return true;
   }
 
@@ -210,21 +243,28 @@ class ConfigStorage {
    */
   static migrate(config) {
     const version = config.version || '0.0.0';
-    
+
     // No migrations needed yet, but structure is in place
     if (version === CONFIG_VERSION) {
       return config;
     }
 
-    // Future migrations would go here
-    // Example:
-    // if (version < '1.1.0') {
-    //   config = this.migrateToV1_1_0(config);
-    // }
+    // 1.0.0 → 1.1.0：补报告单元化新字段默认值（旧配置缺失时读默认，不回退整份配置）
+    if (version < '1.1.0') {
+      if (!('reportUnitSizeThresholdKB' in config)) {
+        config.reportUnitSizeThresholdKB = DEFAULT_CONFIG.reportUnitSizeThresholdKB;
+      }
+      if (!('stageDownloadEnabled' in config)) {
+        config.stageDownloadEnabled = DEFAULT_CONFIG.stageDownloadEnabled;
+      }
+      if (!('maxFilesPerUnit' in config)) {
+        config.maxFilesPerUnit = DEFAULT_CONFIG.maxFilesPerUnit;
+      }
+    }
 
     // Update version
     config.version = CONFIG_VERSION;
-    
+
     return config;
   }
 

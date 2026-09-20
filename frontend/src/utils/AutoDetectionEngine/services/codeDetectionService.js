@@ -232,13 +232,54 @@ async function findSiblingByExtensions(sourceFile, candidateExtensions, director
 }
 
 /**
+ * 从全局配对映射表解析配对文件并读取内容。
+ * 查表命中后按 FileInfo 读出内容，返回与 findSiblingByExtensions 一致的 {content, path} 形状。
+ * @param {Object} pairingMap - buildPairingMap 返回的映射表（可选）
+ * @param {Object} fileInfo - 源文件信息
+ * @param {FileSystemDirectoryHandle} directoryHandle - Directory handle
+ * @param {Function} lookup - 查询函数（pairOfHeader 或 pairOf）
+ * @param {string} directionLabel - 日志方向标签
+ * @returns {Promise<{content: string, path: string}|null>}
+ * @private
+ */
+async function resolveFromPairingMap(pairingMap, fileInfo, directoryHandle, lookup, directionLabel) {
+  if (!pairingMap || typeof lookup !== 'function') return null;
+  const hit = lookup(fileInfo.path);
+  if (!hit) return null;
+  try {
+    const content = await getFileContent(hit, directoryHandle);
+    if (content) {
+      serverLog?.info(`✓ [配对映射·${directionLabel}] ${fileInfo.path} → ${hit.path}（长度: ${content.length} 字符）`);
+      return { content, path: hit.path };
+    }
+  } catch (e) {
+    serverLog?.warn?.(`[配对映射·${directionLabel}] 读取 ${hit.path} 失败，降级同目录查找: ${e?.message || e}`);
+  }
+  return null;
+}
+
+/**
  * Find paired implementation file (.h -> .cpp)
+ * 优先查全局配对映射表（支持 include/src 跨目录布局），未传表或未命中时降级同目录查找。
  * @param {Object} headerFile - Header file info
  * @param {FileSystemDirectoryHandle} directoryHandle - Directory handle
+ * @param {Object} [pairingMap] - 全局配对映射表（buildPairingMap 返回值，可选）
  * @returns {Promise<{content: string, path: string}|null>} - Paired file or null
  */
-async function findPairedImplementationFile(headerFile, directoryHandle) {
+async function findPairedImplementationFile(headerFile, directoryHandle, pairingMap) {
   const possibleExtensions = ['.cpp', '.cc', '.cxx'];
+
+  // 优先查全局映射表（跨目录也能配对）
+  const fromMap = await resolveFromPairingMap(
+    pairingMap, headerFile, directoryHandle,
+    pairingMap?.pairOfHeader?.bind(pairingMap), 'h→impl'
+  );
+  if (fromMap) {
+    serverLog?.info(`✓ 找到配对的实现文件: ${fromMap.path}，长度: ${fromMap.content.length} 字符`);
+    return fromMap;
+  }
+
+  // 降级：同目录查找（现行为，向后兼容）
   const found = await findSiblingByExtensions(headerFile, possibleExtensions, directoryHandle);
 
   if (found) {
@@ -259,12 +300,27 @@ async function findPairedImplementationFile(headerFile, directoryHandle) {
  * （`!pairedFile && estSize > CHUNK_THRESHOLD`），使超大 .cpp 走"头+实现全文合并"
  * 路径而撑爆上下文。
  *
+ * 优先查全局配对映射表（跨目录也能配对），未传表或未命中时降级同目录查找。
+ *
  * @param {Object} implFile - 实现文件信息
  * @param {FileSystemDirectoryHandle} directoryHandle - Directory handle
+ * @param {Object} [pairingMap] - 全局配对映射表（buildPairingMap 返回值，可选）
  * @returns {Promise<{content: string, path: string}|null>} - 配对头文件或 null
  */
-async function findPairedHeaderFile(implFile, directoryHandle) {
+async function findPairedHeaderFile(implFile, directoryHandle, pairingMap) {
   const possibleExtensions = ['.h', '.hpp', '.hxx'];
+
+  // 优先查全局映射表（跨目录也能配对）
+  const fromMap = await resolveFromPairingMap(
+    pairingMap, implFile, directoryHandle,
+    pairingMap?.pairOf?.bind(pairingMap), 'impl→h'
+  );
+  if (fromMap) {
+    serverLog?.info(`✓ 找到配对的头文件（仅用于声明骨架）: ${fromMap.path}，长度: ${fromMap.content.length} 字符`);
+    return fromMap;
+  }
+
+  // 降级：同目录查找（现行为，向后兼容）
   const found = await findSiblingByExtensions(implFile, possibleExtensions, directoryHandle);
 
   if (found) {
@@ -281,9 +337,13 @@ async function findPairedHeaderFile(implFile, directoryHandle) {
  * @param {Object} fileInfo - File information
  * @param {FileSystemDirectoryHandle} [directoryHandle] - Directory handle
  * @param {string} projectType - Project type ('ue_cpp' or 'ue_blueprint')
+ * @param {Object} [pairingMap] - 全局配对映射表（buildPairingMap 返回值，可选；
+ *   未传时配对走同目录降级路径，行为与旧版一致）
+ * @param {Object} [chunkResume] - 块级断点续检参数（可选；仅大文件分块路径使用）：
+ *   { onChunkDone(chunkIndex, defects), skipChunks(完成块集合，乱序安全), startFromChunk(前缀兼容), priorDefects }
  * @returns {Promise<DefectDetectionResult[]>} - List of detected defects
  */
-export async function detectDefectsInFile(fileInfo, directoryHandle, projectType) {
+export async function detectDefectsInFile(fileInfo, directoryHandle, projectType, pairingMap, chunkResume) {
   // Validate required parameters
   if (!projectType) {
     throw new Error('Project type is required for detection');
@@ -326,7 +386,7 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
     // If it's a .h file, try to find corresponding .cpp file (only for C++ projects)
     let pairedFile = null;
     if (['ue_cpp', 'ue4_cpp', 'cpp'].includes(projectType) && fileInfo.name.endsWith('.h') && directoryHandle) {
-      pairedFile = await findPairedImplementationFile(fileInfo, directoryHandle);
+      pairedFile = await findPairedImplementationFile(fileInfo, directoryHandle, pairingMap);
     }
 
     // ===== 大文件闸门：本地预分块送审（P0+P1+P2）=====
@@ -357,6 +417,10 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
           implFileInfo: { name: pairedImpl.path.split('/').pop(), path: pairedImpl.path },
           implContent: pairedImpl.content,
           projectType,
+          // 🔧 块级断点续检透传：方案 5 内部把头块+实现块拼成全局块序列（键挂在本 .h 路径）
+          chunkResume,
+          // 🔧 第三阶段：模型标识（chunk 缓存键维度）
+          model: getCodeReviewAIService()?.model || '',
         });
         if (result && result.coverage) {
           const cov = result.coverage;
@@ -373,7 +437,7 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
         // 反向配对头文件（仅作声明骨架来源）；.h 自身检测时无需反向配对。
         let headerRef = null;
         if (!isHeader && ['ue_cpp', 'ue4_cpp', 'cpp'].includes(projectType) && /\.(cpp|cc|cxx)$/i.test(fileInfo.name) && directoryHandle) {
-          headerRef = await findPairedHeaderFile(fileInfo, directoryHandle);
+          headerRef = await findPairedHeaderFile(fileInfo, directoryHandle, pairingMap);
         }
 
         // 方案 4：超大 .h 自身分块时，预生成「文件结构骨架」并随每块注入，
@@ -395,6 +459,13 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
           projectType,
           headerRef,
           fileStructure,
+          // 🔧 块级断点续检透传（断点恢复时按完成块集合跳过 + 每块完成回调落盘）
+          onChunkDone: chunkResume?.onChunkDone,
+          skipChunks: chunkResume?.skipChunks,
+          startFromChunk: chunkResume?.startFromChunk,
+          priorDefects: chunkResume?.priorDefects,
+          // 🔧 第三阶段：模型标识（chunk 缓存键维度——换模型自动失效）
+          model: getCodeReviewAIService()?.model || '',
         });
         if (chunkResult && chunkResult.coverage) {
           const cov = chunkResult.coverage;
@@ -662,10 +733,11 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
           defect.function
         );
         if (located.located) {
-          return { ...defect, lines: located.lines, linesFromModel: false };
+          // 🔧 C: snippet 自校验——与 lines 区域对不上时用源文件真实代码回填（防"样板行 snippet"）
+          return repairSnippetFromLines({ ...defect, lines: located.lines, linesFromModel: false }, targetContent, altContent);
         }
-        // 反查失败：保留模型原值并标记，便于排查
-        return { ...defect, linesFromModel: true };
+        // 反查失败：保留模型原值并标记，便于排查（同样做 snippet 回填校验）
+        return repairSnippetFromLines({ ...defect, linesFromModel: true }, targetContent, altContent);
       });
       // 🔧 B: 单文件内去重
       const before = defects.length;
@@ -1184,6 +1256,88 @@ function findFunctionRange(normLines, functionName) {
     }
   }
   return { start: normLines[sigIdx].line, end: normLines[endIdx].line };
+}
+
+/**
+ * 🔧 Snippet 自校验与回填（修复"样板行 snippet"问题，2026-09-18）：
+ * 模型有时会把项目内多文件反复出现的公共样板行（如 `UWorld* theWorld = ...GetGameWorld();`）
+ * 当作 snippet 引用，而非缺陷所在的真实代码行，导致报告中 Snippet 与 lines/Risk 对不上
+ * （实测 622 条中 251 条如此，涉及 94 个文件）。
+ *
+ * 策略：以 lines 解析出的起始行号为中心取窗口（覆盖 lines 范围），
+ * 校验 snippet 各行能否在窗口内匹配；命中率不足时，
+ * 从目标源文件按 lines 提取 1-3 行真实代码回填 snippet，
+ * 并打上 snippetRepaired 标记便于排查。lines 本身不受影响。
+ *
+ * @param {Object} defect 缺陷对象（含 snippet/lines）
+ * @param {string|null} fileContent 当前检测文件内容
+ * @param {string|null} altContent 配对文件内容（.h/.cpp 互补）
+ * @returns {Object} 修复后的缺陷对象（未命中则原样返回）
+ */
+export function repairSnippetFromLines(defect, fileContent, altContent) {
+  const SNIPPET_WINDOW_BEFORE = 6;
+  const SNIPPET_WINDOW_AFTER = 10;
+  const SNIPPET_MAX_LINES = 3;
+  const SNIPPET_MAX_CHARS = 240;
+
+  const linesStr = String(defect?.lines || '').trim();
+  const startMatch = linesStr.match(/L\s*(\d+)/i);
+  if (!startMatch) return defect;
+  const startLine = parseInt(startMatch[1], 10);
+  if (!Number.isFinite(startLine) || startLine < 1) return defect;
+
+  const endMatch = linesStr.match(/L\s*(\d+)\s*[-–~]\s*L\s*(\d+)/i);
+  const endLine = endMatch ? parseInt(endMatch[2], 10) : startLine;
+
+  // 归一化一行代码：去行号前缀、去注释、压缩空白（与 locateSnippetInFile 同口径）
+  const normLine = (s) => String(s || '')
+    .replace(/^\s*L\d+:\s*/, '')
+    .replace(/\/\/.*$/, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const snippetLines = String(defect.snippet || '')
+    .split('\n')
+    .map(normLine)
+    .filter(Boolean);
+
+  const contents = [fileContent, altContent].filter(Boolean);
+  if (contents.length === 0) return defect;
+
+  for (const content of contents) {
+    const raw = String(content).split('\n');
+    if (raw.length === 0) continue;
+
+    // 校验窗口：startLine 前后 + 覆盖 lines 范围终点
+    const winFrom = Math.max(0, startLine - 1 - SNIPPET_WINDOW_BEFORE);
+    const winTo = Math.min(raw.length, Math.max(startLine - 1 + SNIPPET_WINDOW_AFTER, endLine - 1 + 2));
+    const window = raw.slice(winFrom, winTo).map(normLine).filter(Boolean);
+
+    if (snippetLines.length > 0 && window.length > 0) {
+      const hit = snippetLines.filter((sl) =>
+        window.some((wl) => (wl.length > 8 && wl.includes(sl)) || (sl.length > 8 && sl.includes(wl)))
+      ).length;
+      // 命中过半（至少 1 行）→ snippet 与 lines 区域一致，无需修复
+      if (hit >= Math.max(1, Math.ceil(snippetLines.length / 2))) {
+        return defect;
+      }
+    }
+
+    // 回填：从 lines 起始行提取真实代码（1-3 行，超长截断）
+    const from = Math.max(0, startLine - 1);
+    const to = Math.min(raw.length, Math.max(startLine, endLine), startLine - 1 + SNIPPET_MAX_LINES);
+    const picked = raw.slice(from, to)
+      .map((l) => l.replace(/\t/g, ' ').replace(/\s+$/, ''))
+      .filter((l) => l.trim().length > 0)
+      .slice(0, SNIPPET_MAX_LINES)
+      .map((l) => (l.length > SNIPPET_MAX_CHARS ? l.slice(0, SNIPPET_MAX_CHARS) + '…' : l));
+
+    if (picked.length > 0) {
+      return { ...defect, snippet: picked.join('\n'), snippetRepaired: true };
+    }
+  }
+  return defect;
 }
 
 export function locateSnippetInFile(snippet, fileContent, altContent = null, hintLine = null, functionName = null) {

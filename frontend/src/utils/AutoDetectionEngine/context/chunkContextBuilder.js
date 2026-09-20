@@ -33,7 +33,7 @@ export async function buildChunkSystemPrompt(projectType) {
  * @param {string} [params.currentScope] 当前块主要所处的类/命名空间名称（方案4，帮助模型关联跨块类定义）
  * @returns {string}
  */
-export function buildChunkUserMessage({ filePath, pureName, slice, startLine, endLine, totalLines, extension, headerSkeleton, headerPath, fileStructureSkeleton, currentScope, projectType }) {
+export function buildChunkUserMessage({ filePath, pureName, slice, startLine, endLine, totalLines, extension, headerSkeleton, headerPath, fileStructureSkeleton, currentScope, projectType, sampleHint = '' }) {
   const userLang = detectUserLanguage();
   const ext = extension ? `.${String(extension).replace(/^\./, '')}` : '';
   const hasSkeleton = !!(headerSkeleton && String(headerSkeleton).trim());
@@ -108,7 +108,7 @@ ${slice}
 - 只按现有缺陷类别检测，**严格以 JSON 数组输出**：no、category、file、function、snippet、lines、risk、howToTrigger、suggestedFix、confidence。**只输出 JSON，不要返回 Markdown 或其他说明。**
 - \`snippet\` 只写纯净代码，不要带 \`L{n}:\` 行号前缀。
 - \`file\` 填相对路径；\`lines\` 必须对应 \`file\` 在原始文件中的真实行号。
-- 推荐单次送审目标约 600-700 行，本片段已控制在此范围内。`;
+- 推荐单次送审目标约 600-700 行，本片段已控制在此范围内。${sampleHint}`;
   }
   userMessage = `Please perform static defect detection on a **contiguous slice** of the C++ file below (this is slice lines ${startLine}-${endLine} of a large file, total ~${totalLines} lines):
 
@@ -128,7 +128,7 @@ ${slice}
 - Detect by the existing categories and **output strictly a JSON array**: no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence. **No Markdown or extra text.**
 - \`snippet\` must be pure code, without the \`L{n}:\` prefix.
 - \`file\` is the relative path; \`lines\` must correspond to the real line numbers of \`file\` in the original file.
-- Recommended single-pass target is ~600-700 lines; this slice is kept within that range.`;
+- Recommended single-pass target is ~600-700 lines; this slice is kept within that range.${sampleHint}`;
 
   // TS 项目：切换代码块语言与输出契约为 TypeScript 对象格式
   if (projectType === 'ts' || projectType === 'ts_famegame') {

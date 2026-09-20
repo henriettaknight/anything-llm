@@ -59,6 +59,14 @@ class SessionStorage {
         failedFiles: [],
         batchResults: []
       },
+      // 🔧 断点续检三级进度清单（轻量，localStorage；大对象在 IndexedDB resumeStore）
+      // 旧会话无此字段——读取侧需兜底（getResumeState）
+      resume: {
+        unitPlan: [],            // 单元划分快照 [{unitName, groupName, files:[path], sizeBytes}]
+        completedUnits: {},      // {unitName: true}
+        completedFiles: {},      // {path: {mtime, size}}（指纹校验基准）
+        chunkProgress: {}        // {path: {doneChunks, totalChunks}}（大文件块级指针，细节在 IndexedDB）
+      },
       error: null
     };
 
@@ -209,6 +217,58 @@ class SessionStorage {
       return this.save(session);
     } catch (error) {
       console.error('Error adding processed file:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 🔧 断点续检：读取三级进度清单（旧会话无 resume 字段时返回空结构）
+   * @param {string} sessionId - Session ID
+   * @returns {Object} { unitPlan, completedUnits, completedFiles, chunkProgress }
+   */
+  static getResumeState(sessionId) {
+    const session = this.load(sessionId);
+    return session?.resume || {
+      unitPlan: [],
+      completedUnits: {},
+      completedFiles: {},
+      chunkProgress: {},
+    };
+  }
+
+  /**
+   * 🔧 断点续检：更新三级进度清单（load-modify-save，幂等合并）
+   * @param {string} sessionId - Session ID
+   * @param {Object} updates - 与 resume 结构对应的增量（浅合并各字段）
+   * @returns {boolean} Success status
+   */
+  static updateResumeState(sessionId, updates) {
+    try {
+      const session = this.load(sessionId);
+      if (!session) {
+        return false;
+      }
+      const current = session.resume || {
+        unitPlan: [],
+        completedUnits: {},
+        completedFiles: {},
+        chunkProgress: {},
+      };
+      session.resume = {
+        unitPlan: updates.unitPlan !== undefined ? updates.unitPlan : current.unitPlan,
+        completedUnits: updates.completedUnits !== undefined
+          ? { ...current.completedUnits, ...updates.completedUnits }
+          : current.completedUnits,
+        completedFiles: updates.completedFiles !== undefined
+          ? { ...current.completedFiles, ...updates.completedFiles }
+          : current.completedFiles,
+        chunkProgress: updates.chunkProgress !== undefined
+          ? { ...current.chunkProgress, ...updates.chunkProgress }
+          : current.chunkProgress,
+      };
+      return this.save(session);
+    } catch (error) {
+      console.error('Error updating resume state:', error);
       return false;
     }
   }

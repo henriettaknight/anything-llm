@@ -8,6 +8,10 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
     directory: config?.directory || "",
     detectionTime: config?.detectionTime || "",
     projectType: config?.projectType || "", // 空字符串表示未选择
+    // 报告单元化（分阶段检测报告）：阈值默认 256KB、阶段下载默认开、文件数兜底默认 200
+    reportUnitSizeThresholdKB: config?.reportUnitSizeThresholdKB ?? 256,
+    stageDownloadEnabled: config?.stageDownloadEnabled ?? true,
+    maxFilesPerUnit: config?.maxFilesPerUnit ?? 200,
   });
   const [errors, setErrors] = useState({});
   const [successMessage, setSuccessMessage] = useState("");
@@ -31,6 +35,9 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
         directory: config.directory || "",
         detectionTime: config.detectionTime || "",
         projectType: config.projectType || "",
+        reportUnitSizeThresholdKB: config.reportUnitSizeThresholdKB ?? 256,
+        stageDownloadEnabled: config.stageDownloadEnabled ?? true,
+        maxFilesPerUnit: config.maxFilesPerUnit ?? 200,
       });
     }
   }, [config]);
@@ -198,6 +205,10 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
       batchSize: 10,
       retryAttempts: 3,
       notificationEnabled: true,
+      // 报告单元化（分阶段检测报告）
+      reportUnitSizeThresholdKB: Number(formData.reportUnitSizeThresholdKB) || 0,
+      stageDownloadEnabled: formData.stageDownloadEnabled !== false,
+      maxFilesPerUnit: Number(formData.maxFilesPerUnit) || 200,
     });
 
     console.log("Save result:", result);
@@ -368,6 +379,89 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
               "Detection will run daily at this time"
             )}
           </p>
+        </div>
+
+        {/* ===== 报告单元化（分阶段检测报告）===== */}
+        <div className="pt-2 border-t border-theme-sidebar-border mt-2">
+          <p className="text-sm font-semibold text-theme-text-primary mb-3">
+            {t("autodetection.config.reportUnit.section", "分阶段报告 (Report Units)")}
+          </p>
+
+          {/* 单元阈值 */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-theme-text-primary mb-2">
+              {t("autodetection.config.reportUnit.threshold", "单元拆分阈值 (KB)")}
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={102400}
+              step={64}
+              value={formData.reportUnitSizeThresholdKB}
+              onChange={(e) => {
+                const v = Math.max(0, Math.min(102400, Number(e.target.value) || 0));
+                setFormData((prev) => ({ ...prev, reportUnitSizeThresholdKB: v }));
+              }}
+              disabled={isSaving}
+              className="w-full px-3 py-2 bg-theme-bg-primary border border-theme-sidebar-border rounded text-theme-text-primary focus:outline-none focus:ring-2 focus:ring-theme-accent-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            <p className="mt-1 text-xs text-theme-text-secondary">
+              {t(
+                "autodetection.config.reportUnit.thresholdHint",
+                "同目录累计文件大小超过该值即拆为新报告单元（a1/a2/root1…），每单元完成立即下载一份阶段报告。0 = 不拆分（全部完成后一次性出报告）"
+              )}
+            </p>
+          </div>
+
+          {/* 文件数兜底 */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-theme-text-primary mb-2">
+              {t("autodetection.config.reportUnit.maxFiles", "单元文件数上限")}
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={10000}
+              step={10}
+              value={formData.maxFilesPerUnit}
+              onChange={(e) => {
+                const v = Math.max(1, Math.min(10000, Number(e.target.value) || 200));
+                setFormData((prev) => ({ ...prev, maxFilesPerUnit: v }));
+              }}
+              disabled={isSaving}
+              className="w-full px-3 py-2 bg-theme-bg-primary border border-theme-sidebar-border rounded text-theme-text-primary focus:outline-none focus:ring-2 focus:ring-theme-accent-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            <p className="mt-1 text-xs text-theme-text-secondary">
+              {t(
+                "autodetection.config.reportUnit.maxFilesHint",
+                "防止大量小文件挤进同一单元导致报告过大，一般无需调整"
+              )}
+            </p>
+          </div>
+
+          {/* 阶段下载开关 */}
+          <div className="mb-1">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={formData.stageDownloadEnabled}
+                onChange={(e) => {
+                  setFormData((prev) => ({ ...prev, stageDownloadEnabled: e.target.checked }));
+                }}
+                disabled={isSaving}
+                className="w-4 h-4 rounded border-theme-sidebar-border bg-theme-bg-primary text-theme-accent-primary focus:ring-theme-accent-primary"
+              />
+              <span className="text-sm font-medium text-theme-text-primary">
+                {t("autodetection.config.reportUnit.stageDownload", "启用阶段报告下载")}
+              </span>
+            </label>
+            <p className="mt-1 text-xs text-theme-text-secondary">
+              {t(
+                "autodetection.config.reportUnit.stageDownloadHint",
+                "开启后每单元完成即下载阶段报告小包；检测结束时仍会下载完整汇总包。首次使用 Chrome 会弹出「允许下载多个文件」授权，请选择允许"
+              )}
+            </p>
+          </div>
         </div>
 
         {/* Submit Error */}
