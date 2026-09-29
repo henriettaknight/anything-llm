@@ -65,6 +65,9 @@ const AutoDetectionAPI = {
   setOnReportGenerated: (callback) => {
     detectionService.setOnReportGenerated(callback);
   },
+  setOnUnitReportGenerated: (callback) => {
+    detectionService.setOnUnitReportGenerated(callback);
+  },
 
   // Stop detection
   stop: async () => {

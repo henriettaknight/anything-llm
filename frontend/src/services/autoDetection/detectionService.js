@@ -42,6 +42,7 @@ class DetectionService {
     this.engine = null;
     this.directoryHandle = null;
     this.onReportGeneratedCallback = null;  // 添加回调存储
+    this.onUnitReportGeneratedCallback = null;  // 逐子模块流式回调
   }
 
   /**
@@ -94,6 +95,10 @@ class DetectionService {
    */
   setOnReportGenerated(callback) {
     this.onReportGeneratedCallback = callback;
+  }
+
+  setOnUnitReportGenerated(callback) {
+    this.onUnitReportGeneratedCallback = callback;
   }
 
   /**
@@ -262,7 +267,8 @@ class DetectionService {
             }, 2000);
           }
         },
-        onReportGenerated: this.onReportGeneratedCallback  // 传递回调
+        onReportGenerated: this.onReportGeneratedCallback,  // 传递回调
+        onUnitReportGenerated: this.onUnitReportGeneratedCallback  // 逐子模块流式回调
       });
 
       console.log('Detection result:', result);

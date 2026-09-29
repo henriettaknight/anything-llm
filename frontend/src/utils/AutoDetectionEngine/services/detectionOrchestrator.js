@@ -11,6 +11,8 @@ import SessionStorage, { SessionStatus } from '../storage/sessionStorage.js';
 import { resourceMonitorService } from './resourceMonitorService.js';
 import tokenStatisticsService from './tokenStatisticsService.js';
 import zipPackageService from './zipPackageService.js';
+import outputWriterService from './outputWriterService.js';
+import reportGenerationService from './reportGenerationService.js';
 import { serverLog } from './serverLogService.js';
 
 /**
@@ -68,7 +70,7 @@ class DetectionOrchestratorImpl {
    */
   async startDetection(options) {
     console.log('🔥 NEW CODE LOADED - startDetection called with force cleanup');
-    const { directoryHandle, config, onProgress, onStatusChange, onReportGenerated, resumeFromLast = false } = options;
+    const { directoryHandle, config, onProgress, onStatusChange, onReportGenerated, onUnitReportGenerated, resumeFromLast = false } = options;
 
     // Force cleanup any existing session state
     console.log('🧹 强制清理会话状态');
@@ -183,6 +185,28 @@ class DetectionOrchestratorImpl {
       
       this.notifyProgress();
 
+      // ★ 流式产出：解析输出根 + 创建本运行专属文件夹（仅当 streamPerUnit）
+      const streamPerUnit = config.streamPerUnit !== false; // 默认 true
+      const projectType = config.projectType || 'detection';
+      const { detectUserLanguage: _detectUserLanguage } = await import('../utils/languageDetector.js');
+      const locale = (_detectUserLanguage() === 'zh') ? 'zh' : 'en';
+      const runDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      let runFolder = null;
+      let runFolderName = '';
+      if (streamPerUnit) {
+        try {
+          const outputRoot = await outputWriterService.resolveOutputRoot(config, directoryHandle);
+          const runSeq = await outputWriterService.nextRunSeq(outputRoot, projectType, runDate);
+          runFolderName = `${projectType}_${runDate}_${String(runSeq).padStart(2, '0')}`;
+          runFolder = outputRoot ? await outputRoot.getDirectoryHandle(runFolderName, { create: true }) : null;
+          console.log(`📁 运行文件夹已创建: ${runFolderName} (输出根模式: ${config.outputDirMode || 'input'})`);
+        } catch (e) {
+          console.error('❌ 创建运行文件夹失败，回退为 saveAs 下载模式:', e);
+          runFolder = null;
+        }
+        this._runFolderName = runFolderName;
+      }
+
       // Step 2: Process each group
       console.log('步骤 2: 开始批处理检测...');
       const allResults = [];
@@ -228,7 +252,11 @@ class DetectionOrchestratorImpl {
         );
         
         allResults.push(groupResult);
-        
+
+        if (streamPerUnit) {
+          await this.emitUnitReport(group, groupResult, runFolder, runFolderName, locale, onUnitReportGenerated);
+        }
+
         console.log(`✅ 分组 ${group.name} 检测完成`);
         // 注意：报告生成已延迟到最后统一处理，避免重复生成
       }
@@ -253,7 +281,11 @@ class DetectionOrchestratorImpl {
           this.currentSession.id  // 传递 sessionId
         );
         allResults.push(rootResult);
-        
+
+        if (streamPerUnit) {
+          await this.emitUnitReport({ name: 'root', path: '.', files: rootFiles }, rootResult, runFolder, runFolderName, locale, onUnitReportGenerated);
+        }
+
         console.log(`✅ 根目录文件检测完成`);
         // 注意：报告生成已延迟到最后统一处理，避免重复生成
       }
@@ -278,9 +310,7 @@ class DetectionOrchestratorImpl {
 
       if (tokenStats) {
         // 始终生成 token_statistics.xlsx（即便 0 文件也输出仅汇总页），避免文件整包丢失
-        const { detectUserLanguage } = await import('../utils/languageDetector.js');
-        const userLang = detectUserLanguage();
-        const locale = userLang === 'zh' ? 'zh' : 'en';
+        // locale 已在上方运行文件夹准备阶段计算（streamPerUnit 分支），此处直接复用
 
         tokenStatisticsXLSX = await tokenStatisticsService.generateXLSXBuffer(tokenStats, locale);
         console.log('📊 [tokenStats] generateXLSXBuffer 结果:', tokenStatisticsXLSX ? `OK(${tokenStatisticsXLSX.byteLength}B)` : 'NULL');
@@ -290,9 +320,31 @@ class DetectionOrchestratorImpl {
       } else {
         console.warn('⚠️ No active token statistics session (endSession 返回 null) —— token_statistics.xlsx 将缺失');
       }
-      
-      // Collect all defect reports for ZIP packaging
-      console.log('📦 Collecting all reports for ZIP packaging...');
+
+      // ★ 流式模式：将全局 token 统计写入运行文件夹（不再整包 ZIP）
+      if (streamPerUnit && tokenStatisticsXLSX) {
+        try {
+          if (runFolder) {
+            await outputWriterService.writeBlobToDir(runFolder, 'token_statistics.xlsx', tokenStatisticsXLSX);
+          } else {
+            await outputWriterService.writeBlobToDir(null, `${runFolderName || 'detection'}_token_statistics.xlsx`, tokenStatisticsXLSX);
+          }
+          console.log('📊 全局 token_statistics.xlsx 已写入运行文件夹');
+        } catch (e) {
+          console.error('❌ 写入全局 token_statistics.xlsx 失败:', e);
+        }
+      }
+
+      // 统一报告时间戳（localStorage 与 ZIP 文件名共用）
+      const now = new Date();
+      const timestamp = now.toISOString()
+        .replace(/[:.]/g, '-')
+        .replace('T', '_')
+        .substring(0, 19);
+
+      // 旧行为（streamPerUnit=false）：收集各分组报告并整包 ZIP 下载
+      if (!streamPerUnit) {
+        console.log('📦 Collecting all reports for ZIP packaging...');
       const defectReports = [];
       
       for (const result of allResults) {
@@ -300,8 +352,6 @@ class DetectionOrchestratorImpl {
         const batchResults = (result.batches || []).flatMap(batch => batch.results || []);
         
         // Generate CSV content for this group
-        const { default: reportGenerationService } = await import('./reportGenerationService.js');
-        
         const groupReport = {
           groupName: groupName,
           groupPath: result.groupPath || '.',
@@ -348,17 +398,10 @@ class DetectionOrchestratorImpl {
       }
       
       // HTML 报告已移除：报告统一以 xlsx 交付（缺陷明细 xlsx + token_statistics.xlsx）
-      
+
       // Package everything into ZIP and download
       console.log('📦 Packaging all reports into ZIP...');
-      
-      // Generate timestamp for filename: YYYY-MM-DD_HH-MM-SS
-      const now = new Date();
-      const timestamp = now.toISOString()
-        .replace(/[:.]/g, '-')
-        .replace('T', '_')
-        .substring(0, 19);
-      
+
       await zipPackageService.packageAndDownload({
         defectReports: defectReports,
         tokenStatistics: tokenStatisticsXLSX,
@@ -366,6 +409,7 @@ class DetectionOrchestratorImpl {
       });
       
       console.log('✅ ZIP package generated and downloaded successfully');
+      }
       
       // 🔧 调用 onReportGenerated 回调，保存报告到 localStorage（报告区）
       if (onReportGenerated) {
@@ -678,6 +722,52 @@ class DetectionOrchestratorImpl {
       batches: processedBatches,
       aggregated
     };
+  }
+
+  /**
+   * 立即把一个子模块的检测结果写入运行文件夹（流式产出核心）。
+   * 生成「缺陷明细 + Token 统计-汇总 + Token 统计-逐文件」三 sheet xlsx，
+   * 并按 streamPerUnit 模式通过 writeBlobToDir 落盘（不支持 File System Access API 时回退 saveAs）。
+   */
+  async emitUnitReport(group, groupResult, runFolder, runFolderName, locale, onUnitReportGenerated) {
+    const groupName = group.name;
+    const batchResults = (groupResult.batches || []).flatMap(b => b.results || []);
+    const groupReport = {
+      groupName,
+      groupPath: groupResult.groupPath || '.',
+      filesScanned: batchResults.length,
+      defectsFound: batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0),
+      defects: batchResults.flatMap(r => r.defects || []),
+      fileResults: batchResults.map(r => ({
+        file: { path: r.filePath || r.file?.path },
+        filePath: r.filePath || r.file?.path,
+        defects: r.defects || [],
+        hasDefects: (r.defects?.length || 0) > 0
+      })),
+      totalFiles: batchResults.length,
+      totalDefects: batchResults.reduce((sum, r) => sum + (r.defects?.length || 0), 0),
+      summary: { bySeverity: {}, byType: {} }
+    };
+
+    const detectionReport = reportGenerationService.convertCodeDetectionReport(groupReport);
+    const blob = await reportGenerationService.generateUnitXLSX(detectionReport, groupName, locale);
+
+    const fileName = `${groupName}.xlsx`;
+    try {
+      if (runFolder) {
+        await outputWriterService.writeBlobToDir(runFolder, fileName, blob);
+      } else {
+        // 无 File System Access API：回退 saveAs，加运行文件夹前缀区分
+        await outputWriterService.writeBlobToDir(null, `${runFolderName || 'detection'}_${fileName}`, blob);
+      }
+      console.log(`📁 子模块报告已写入: ${fileName}`);
+    } catch (e) {
+      console.error(`❌ 写入子模块报告失败: ${fileName}`, e);
+    }
+
+    if (onUnitReportGenerated) {
+      onUnitReportGenerated({ ...groupReport, sessionId: this.currentSession?.id, timestamp: Date.now(), createdAt: new Date().toISOString() });
+    }
   }
 
   /**

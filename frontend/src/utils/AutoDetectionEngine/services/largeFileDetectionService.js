@@ -283,7 +283,7 @@ function locateChunkDefects(defects, fileContent, chunk, fileInfo) {
  *        超大 .h 自身分块时由调用方预生成后传入，使模型感知"当前块位于哪个类/命名空间"。
  * @returns {Promise<{defects:Array,coverage:Object,manifest:Array,mode:string}>}
  */
-export async function detectLargeFileDefects({ fileInfo, fileContent, projectType, headerRef, fileStructure }) {
+export async function detectLargeFileDefects({ fileInfo, fileContent, projectType, headerRef, fileStructure, moduleName }) {
   const serverLog = getServerLog();
   const detectionStartTime = Date.now();
   const totalLines = (fileContent || '').split('\n').length;
@@ -396,15 +396,17 @@ export async function detectLargeFileDefects({ fileInfo, fileContent, projectTyp
         completion_tokens: chunkUsages.reduce((s, u) => s + (u.completion_tokens || 0), 0),
         total_tokens: chunkUsages.reduce((s, u) => s + (u.total_tokens || 0), 0),
       } : null;
-      const pathParts = (fileInfo.path || '').split('/').filter(p => p && p !== '.');
-      const moduleName = pathParts.length <= 1 ? 'root' : pathParts[0];
+      const finalModuleName = moduleName || (() => {
+        const pathParts = (fileInfo.path || '').split('/').filter(p => p && p !== '.');
+        return pathParts.length <= 1 ? 'root' : pathParts[0];
+      })();
       tokenStatisticsService.recordFileTokens(
         fileInfo.name,
         fileInfo.path,
         aggregatedUsage,
         aggregatedPrompt,
         aggregatedResponse,
-        moduleName,
+        finalModuleName,
         Date.now() - detectionStartTime,
         lineStats
       );

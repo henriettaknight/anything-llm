@@ -28,6 +28,10 @@ export default function AutoDetectionContainer() {
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [reportCreated, setReportCreated] = useState(false); // 标记报告是否已创建
+  const [outputConfig, setOutputConfig] = useState({
+    outputDirMode: "input", // input(默认) | parent | fixed | custom
+    customOutputDirHandle: null,
+  });
 
   // Load initial config and reports on mount
   useEffect(() => {
@@ -381,8 +385,19 @@ export default function AutoDetectionContainer() {
         await handleGroupReportGenerated(groupReport);
       });
 
+      // 逐子模块流式产出回调 - 每个子模块完成后即时刷新报告区
+      AutoDetectionAPI.setOnUnitReportGenerated(async (unitReport) => {
+        await handleGroupReportGenerated(unitReport);
+      });
+
       // Load full config from configService
       const fullConfig = await configService.getConfig();
+      // 合并前端“输出位置”配置（流式写入运行文件夹）
+      fullConfig.streamPerUnit = true; // 新行为默认开启
+      fullConfig.outputDirMode = outputConfig.outputDirMode || "input";
+      if (outputConfig.customOutputDirHandle) {
+        fullConfig.customOutputDirHandle = outputConfig.customOutputDirHandle;
+      }
       console.log('Starting detection with config:', fullConfig);
 
       const result = await AutoDetectionAPI.start(fullConfig);
@@ -552,6 +567,11 @@ export default function AutoDetectionContainer() {
                   config={config}
                   onSave={saveConfig}
                   isSaving={isSaving}
+                  outputDirMode={outputConfig.outputDirMode}
+                  customOutputDirHandle={outputConfig.customOutputDirHandle}
+                  onOutputConfigChange={(partial) =>
+                    setOutputConfig((prev) => ({ ...prev, ...partial }))
+                  }
                 />
               </div>
 

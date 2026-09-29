@@ -9,6 +9,7 @@ import { createTranslationService } from './translationService.js';
 import { detectUserLanguage, needsTranslation } from '../utils/languageDetector.js';
 import { enhancedTranslate, containsChinese, validateTranslation } from './translationEnhancer.js';
 import { resolveReportGroups } from './reportDownloadResolver.js';
+import tokenStatisticsService from './tokenStatisticsService.js';
 
 /**
  * @typedef {Object} DefectInfo
@@ -808,6 +809,43 @@ class ReportGenerationServiceImpl {
    * @returns {{ blob: Blob, fileName: string }}
    */
   generateXLSXReport(report, groupName) {
+    const rows = this._buildDefectRows(report);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Set column widths for readability
+    ws['!cols'] = [
+      { wch: 5 },   // No
+      { wch: 10 },  // Category
+      { wch: 35 },  // File
+      { wch: 30 },  // Function/Symbol
+      { wch: 50 },  // Snippet
+      { wch: 15 },  // Lines
+      { wch: 20 },  // Risk
+      { wch: 30 },  // HowToTrigger
+      { wch: 40 },  // SuggestedFix
+      { wch: 10 },  // Confidence
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Defects');
+
+    const wbBuf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbBuf], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const fileName = `${groupName.toLowerCase()}.xlsx`;
+    return { blob, fileName };
+  }
+
+  /**
+   * Build defect detail rows (aoa, with header) for xlsx export.
+   * Shared by generateXLSXReport (single Defects sheet) and generateUnitXLSX (multi-sheet).
+   * @param {DetectionReport} report
+   * @param {string} [locale='zh']
+   * @returns {Array<Array>}
+   */
+  _buildDefectRows(report, locale = 'zh') {
     const headers = [
       'No', 'Category', 'File', 'Function/Symbol',
       'Snippet', 'Lines', 'Risk', 'HowToTrigger', 'SuggestedFix', 'Confidence'
@@ -883,31 +921,50 @@ class ReportGenerationServiceImpl {
       }
     }
 
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+    return rows;
+  }
 
-    // Set column widths for readability
-    ws['!cols'] = [
-      { wch: 5 },   // No
-      { wch: 10 },  // Category
-      { wch: 35 },  // File
-      { wch: 30 },  // Function/Symbol
-      { wch: 50 },  // Snippet
-      { wch: 15 },  // Lines
-      { wch: 20 },  // Risk
-      { wch: 30 },  // HowToTrigger
-      { wch: 40 },  // SuggestedFix
-      { wch: 10 },  // Confidence
-    ];
-
+  /**
+   * Generate a single-module xlsx Blob containing three sheets:
+   * 缺陷明细 + Token统计-汇总 + Token统计-逐文件.
+   * Token sheets are filtered per-module via tokenStatisticsService.buildModuleTokenSheets.
+   * @param {DetectionReport} unitReport - converted detection report for one module
+   * @param {string} moduleName
+   * @param {string} [locale='zh']
+   * @returns {Promise<Blob>}
+   */
+  async generateUnitXLSX(unitReport, moduleName, locale = 'zh') {
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Defects');
+
+    // Sheet 1: 缺陷明细（复用现有缺陷行构造）
+    const defectRows = this._buildDefectRows(unitReport, locale);
+    const wsDefect = XLSX.utils.aoa_to_sheet(defectRows);
+    wsDefect['!cols'] = [
+      { wch: 5 }, { wch: 10 }, { wch: 35 }, { wch: 30 }, { wch: 50 },
+      { wch: 15 }, { wch: 20 }, { wch: 30 }, { wch: 40 }, { wch: 10 },
+    ];
+    XLSX.utils.book_append_sheet(wb, wsDefect, locale === 'zh' ? '缺陷明细' : 'Defects');
+
+    // Sheet 2/3: 该子模块 token 统计（汇总 + 逐文件），复用 tokenStatisticsService
+    const { summaryRows, fileRows } = tokenStatisticsService.buildModuleTokenSheets(moduleName, locale);
+    if (summaryRows.length) {
+      const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+      wsSummary['!cols'] = [{ wch: 35 }, { wch: 30 }];
+      XLSX.utils.book_append_sheet(wb, wsSummary, locale === 'zh' ? 'Token统计-汇总' : 'Token Summary');
+    }
+    if (fileRows.length) {
+      const wsFiles = XLSX.utils.aoa_to_sheet(fileRows);
+      wsFiles['!cols'] = [
+        { wch: 30 }, { wch: 50 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+        { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 26 }
+      ];
+      XLSX.utils.book_append_sheet(wb, wsFiles, locale === 'zh' ? 'Token统计-逐文件' : 'Token Per-File');
+    }
 
     const wbBuf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([wbBuf], {
+    return new Blob([wbBuf], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
-    const fileName = `${groupName.toLowerCase()}.xlsx`;
-    return { blob, fileName };
   }
 
   /**

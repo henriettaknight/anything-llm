@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import AutoDetectionAPI from "@/models/autodetection";
+import outputWriterService from "@/utils/AutoDetectionEngine/services/outputWriterService";
 
-export default function ConfigPanel({ config, onSave, isSaving }) {
+export default function ConfigPanel({ config, onSave, isSaving, onOutputConfigChange }) {
   const { t } = useTranslation();
   const [formData, setFormData] = useState({
     directory: config?.directory || "",
@@ -13,6 +14,9 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
   const [successMessage, setSuccessMessage] = useState("");
   const [directoryHandle, setDirectoryHandle] = useState(null);
   const [isSelectingDirectory, setIsSelectingDirectory] = useState(false);
+  const [outputDirMode, setOutputDirMode] = useState(config?.outputDirMode || "custom");
+  const [customOutputHandle, setCustomOutputHandle] = useState(config?.customOutputDirHandle || null);
+  const [customOutputName, setCustomOutputName] = useState("");
   const [browserSupport, setBrowserSupport] = useState({
     fileSystemAPI: false,
     indexedDB: false,
@@ -22,6 +26,23 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
   useEffect(() => {
     checkBrowserSupport();
     restoreDirectoryHandle();
+  }, []);
+
+  // 挂载时恢复已持久化的自定义输出目录句柄
+  useEffect(() => {
+    (async () => {
+      try {
+        const handle = await outputWriterService.restoreCustomOutputHandle();
+        if (handle) {
+          setCustomOutputHandle(handle);
+          setCustomOutputName(handle.name || "");
+          setOutputDirMode("custom");
+          onOutputConfigChange?.({ outputDirMode: "custom", customOutputDirHandle: handle });
+        }
+      } catch (e) {
+        // 忽略：恢复失败不影响默认行为
+      }
+    })();
   }, []);
 
   // Update form when config prop changes
@@ -64,6 +85,43 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
     } catch (error) {
       console.error("Error restoring directory handle:", error);
     }
+  };
+
+  const handleOutputModeChange = (mode) => {
+    setOutputDirMode(mode);
+    onOutputConfigChange?.({ outputDirMode: mode, customOutputDirHandle: mode === "custom" ? customOutputHandle : null });
+  };
+
+  const handleSelectCustomOutput = async () => {
+    try {
+      const handle = await window.showDirectoryPicker();
+      const perm = await handle.queryPermission({ mode: "readwrite" });
+      if (perm !== "granted") {
+        const p = await handle.requestPermission({ mode: "readwrite" });
+        if (p !== "granted") throw new Error("Permission denied");
+      }
+      await outputWriterService.persistCustomOutputHandle(handle);
+      setCustomOutputHandle(handle);
+      setCustomOutputName(handle.name || "");
+      setOutputDirMode("custom");
+      onOutputConfigChange?.({ outputDirMode: "custom", customOutputDirHandle: handle });
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      console.error("选择自定义输出目录失败:", error);
+      setErrors((prev) => ({ ...prev, customOutput: error.message || "选择自定义输出目录失败" }));
+    }
+  };
+
+  const handleClearCustomOutput = async () => {
+    setCustomOutputHandle(null);
+    setCustomOutputName("");
+    setOutputDirMode("custom");
+    try {
+      await outputWriterService.clearCustomOutputHandle();
+    } catch (e) {
+      // 忽略
+    }
+    onOutputConfigChange?.({ outputDirMode: "custom", customOutputDirHandle: null });
   };
 
   const handleSelectDirectory = async () => {
@@ -289,6 +347,84 @@ export default function ConfigPanel({ config, onSave, isSaving }) {
           </div>
           {errors.directory && (
             <p className="mt-1 text-sm text-red-600">{errors.directory}</p>
+          )}
+        </div>
+
+        {/* 输出位置（检测报告写入位置，位于输入目录选择器下方） */}
+        <div>
+          <label className="block text-sm font-medium text-theme-text-primary mb-2">
+            {t("autodetection.config.outputLocation", "输出位置")}
+          </label>
+          <div className="space-y-2">
+            {[
+              {
+                value: "custom",
+                label: t(
+                  "autodetection.config.output.custom",
+                  "自定义目录(不选择则默认输出到输入目录内,即与待检测源码同目录)"
+                ),
+              },
+            ].map((opt) => (
+              <label
+                key={opt.value}
+                className="flex items-center gap-2 text-sm text-theme-text-primary cursor-pointer"
+              >
+                <input
+                  type="radio"
+                  name="outputDirMode"
+                  value={opt.value}
+                  checked={outputDirMode === opt.value}
+                  onChange={() => handleOutputModeChange(opt.value)}
+                  disabled={isSaving}
+                  className="accent-theme-accent-primary"
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+
+          {outputDirMode === "custom" && (
+            <div className="mt-2 flex gap-2 items-center">
+              <div className="flex-1">
+                <input
+                  type="text"
+                  value={customOutputName}
+                  readOnly
+                  placeholder={t(
+                    "autodetection.config.output.customPlaceholder",
+                    "未选择自定义目录"
+                  )}
+                  className="w-full px-3 py-2 bg-theme-bg-primary border border-theme-sidebar-border rounded text-theme-text-primary placeholder-theme-text-secondary focus:outline-none focus:ring-2 focus:ring-theme-accent-primary"
+                />
+              </div>
+              <button
+                onClick={handleSelectCustomOutput}
+                disabled={isSaving}
+                className="px-4 py-2 bg-gray-50 text-gray-800 rounded font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity border-2 border-gray-200"
+              >
+                {t("autodetection.config.output.selectButton", "选择目录")}
+              </button>
+              {customOutputHandle && (
+                <button
+                  onClick={handleClearCustomOutput}
+                  disabled={isSaving}
+                  className="px-3 py-2 bg-theme-bg-primary text-theme-text-secondary rounded hover:bg-theme-bg-secondary transition-colors border-2 border-theme-sidebar-border"
+                  title={t("autodetection.config.output.clearButton", "清除")}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
+
+          <p className="mt-1 text-xs text-theme-text-secondary">
+            {t(
+              "autodetection.config.output.hint",
+              "不选择则默认输出到输入目录内（与待检测源码同目录）"
+            )}
+          </p>
+          {errors.customOutput && (
+            <p className="mt-1 text-sm text-red-600">{errors.customOutput}</p>
           )}
         </div>
 

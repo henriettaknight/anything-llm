@@ -454,39 +454,14 @@ class TokenStatisticsService {
   }
 
   /**
-   * Generate token statistics as an xlsx ArrayBuffer using SheetJS.
+   * Build per-file token rows (aoa) for xlsx, reused by global & per-module export.
+   * @private
    * @param {Object} sessionStats
    * @param {string} [locale='zh']
-   * @returns {ArrayBuffer|null}
+   * @returns {Array<Array>}
    */
-  async generateXLSXBuffer(sessionStats, locale = 'zh') {
-    if (!sessionStats) {
-      console.warn('⚠️ No token statistics data to generate xlsx');
-      return null;
-    }
-
-    const XLSX = await import('xlsx');
-
-    // 费用估算：按 2026 公开 API 价估算（本地 gemma4 模型无真实 API 费用）
-    const ds = estimateCost(API_PRICING.deepseek, sessionStats);
-    const cl = estimateCost(API_PRICING.claude, sessionStats);
-    const dsTotal = ds.prompt + ds.completion;
-    const clTotal = cl.prompt + cl.completion;
-
+  _buildFileRows(sessionStats, locale = 'zh') {
     const isZh = locale === 'zh';
-
-    // 安全处理旧报告（可能缺少 startTime/endTime/summary 等字段）
-    const safeISO = (ts) => {
-      const d = new Date(ts);
-      return isNaN(d.getTime()) ? '' : d.toISOString();
-    };
-    const s = sessionStats.summary || {};
-    const safeAvg = (v) => (typeof v === 'number' ? v : 0);
-    const durMin = (sessionStats.startTime && sessionStats.endTime)
-      ? Number(((sessionStats.endTime - sessionStats.startTime) / 60000).toFixed(2))
-      : 'N/A';
-
-    // --- Sheet 1: per-file records ---
     const fileHeaders = isZh
       ? ['文件名', '文件路径', '总行数', '代码行', '注释行', 'Prompt Tokens', 'Completion Tokens', '总 Tokens', '耗时(秒)', '是否估算', '时间戳']
       : ['File Name', 'File Path', 'Total Lines', 'Code Lines', 'Comment Lines', 'Prompt Tokens', 'Completion Tokens', 'Total Tokens', 'Time(s)', 'Estimated', 'Timestamp'];
@@ -510,18 +485,42 @@ class TokenStatisticsService {
         ]);
       }
     }
+    return fileRows;
+  }
 
-    const wsFiles = XLSX.utils.aoa_to_sheet(fileRows);
-    wsFiles['!cols'] = [
-      { wch: 30 }, { wch: 50 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
-      { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 26 }
-    ];
+  /**
+   * Build summary token rows (aoa) for xlsx, including cost estimation.
+   * Reused by global & per-module export so the layout stays identical.
+   * @private
+   * @param {Object} sessionStats
+   * @param {string} [locale='zh']
+   * @returns {Array<Array>}
+   */
+  _buildSummaryRows(sessionStats, locale = 'zh') {
+    const isZh = locale === 'zh';
 
-    // --- Sheet 2: summary ---
+    // 费用估算：按 2026 公开 API 价估算（本地 gemma4 模型无真实 API 费用）
+    const ds = estimateCost(API_PRICING.deepseek, sessionStats);
+    const cl = estimateCost(API_PRICING.claude, sessionStats);
+    const dsTotal = ds.prompt + ds.completion;
+    const clTotal = cl.prompt + cl.completion;
+
+    // 安全处理旧报告（可能缺少 startTime/endTime/summary 等字段）
+    const safeISO = (ts) => {
+      const d = new Date(ts);
+      return isNaN(d.getTime()) ? '' : d.toISOString();
+    };
+    const s = sessionStats.summary || {};
+    const safeAvg = (v) => (typeof v === 'number' ? v : 0);
+    const durMin = (sessionStats.startTime && sessionStats.endTime)
+      ? Number(((sessionStats.endTime - sessionStats.startTime) / 60000).toFixed(2))
+      : 'N/A';
+
+    const hasFileRecords = Array.isArray(sessionStats.fileRecords) && sessionStats.fileRecords.length > 0;
     const estimatedCount = hasFileRecords ? sessionStats.fileRecords.filter(r => r.estimated).length : (sessionStats.estimatedCount || 0);
     const actualCount = hasFileRecords ? sessionStats.fileRecords.length - estimatedCount : (sessionStats.actualCount || 0);
 
-    const summaryRows = isZh ? [
+    return isZh ? [
       ['会话 ID', sessionStats.sessionId || ''],
       ['开始时间', safeISO(sessionStats.startTime)],
       ['结束时间', safeISO(sessionStats.endTime)],
@@ -574,9 +573,85 @@ class TokenStatisticsService {
       ['  Total Cost', `$${clTotal.toFixed(4)}`],
       ['  Total Cost (CNY)', `¥${(clTotal * USD_TO_CNY).toFixed(2)}`],
     ];
+  }
+
+  /**
+   * Aggregate a subset of file records into a session-like stats object
+   * (totals, per-file averages, time range). Used for per-module export.
+   * @private
+   * @param {Array} records - file records belonging to one module
+   * @param {string} id - module name used as sessionId
+   * @returns {Object}
+   */
+  _buildStatsFromRecords(records, id) {
+    const totalPromptTokens = records.reduce((sum, r) => sum + (r.promptTokens || 0), 0);
+    const totalCompletionTokens = records.reduce((sum, r) => sum + (r.completionTokens || 0), 0);
+    const totalTokens = records.reduce((sum, r) => sum + (r.totalTokens || 0), 0);
+    const filesProcessed = records.length;
+    const avg = (v) => (filesProcessed > 0 ? Math.round(v / filesProcessed) : 0);
+    const times = records.map((r) => r.timestamp).filter(Boolean);
+    return {
+      sessionId: id,
+      startTime: times.length ? Math.min(...times) : null,
+      endTime: times.length ? Math.max(...times) : null,
+      filesProcessed,
+      totalPromptTokens,
+      totalCompletionTokens,
+      totalTokens,
+      summary: {
+        avgPromptTokensPerFile: avg(totalPromptTokens),
+        avgCompletionTokensPerFile: avg(totalCompletionTokens),
+        avgTotalTokensPerFile: avg(totalTokens),
+      },
+      fileRecords: records,
+      estimatedCount: records.filter((r) => r.estimated).length,
+      actualCount: filesProcessed - records.filter((r) => r.estimated).length,
+    };
+  }
+
+  /**
+   * Build per-module token sheets (summary + per-file) filtered by moduleName.
+   * Reuses _buildSummaryRows / _buildFileRows so the layout matches the global xlsx.
+   * @param {string} moduleName
+   * @param {string} [locale='zh']
+   * @returns {{summaryRows: Array<Array>, fileRows: Array<Array>}}
+   */
+  buildModuleTokenSheets(moduleName, locale = 'zh') {
+    const recs = (this.currentSession?.fileRecords || []).filter((r) => r.moduleName === moduleName);
+    if (!recs.length) return { summaryRows: [], fileRows: [] };
+    const stats = this._buildStatsFromRecords(recs, moduleName);
+    return {
+      summaryRows: this._buildSummaryRows(stats, locale),
+      fileRows: this._buildFileRows(stats, locale),
+    };
+  }
+
+  /**
+   * Generate token statistics as an xlsx ArrayBuffer using SheetJS.
+   * @param {Object} sessionStats
+   * @param {string} [locale='zh']
+   * @returns {ArrayBuffer|null}
+   */
+  async generateXLSXBuffer(sessionStats, locale = 'zh') {
+    if (!sessionStats) {
+      console.warn('⚠️ No token statistics data to generate xlsx');
+      return null;
+    }
+
+    const XLSX = await import('xlsx');
+    const isZh = locale === 'zh';
+
+    const summaryRows = this._buildSummaryRows(sessionStats, locale);
+    const fileRows = this._buildFileRows(sessionStats, locale);
 
     const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
     wsSummary['!cols'] = [{ wch: 35 }, { wch: 30 }];
+
+    const wsFiles = XLSX.utils.aoa_to_sheet(fileRows);
+    wsFiles['!cols'] = [
+      { wch: 30 }, { wch: 50 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+      { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 26 }
+    ];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, wsSummary, isZh ? '汇总' : 'Summary');

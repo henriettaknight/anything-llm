@@ -283,7 +283,7 @@ async function findPairedHeaderFile(implFile, directoryHandle) {
  * @param {string} projectType - Project type ('ue_cpp' or 'ue_blueprint')
  * @returns {Promise<DefectDetectionResult[]>} - List of detected defects
  */
-export async function detectDefectsInFile(fileInfo, directoryHandle, projectType) {
+export async function detectDefectsInFile(fileInfo, directoryHandle, projectType, moduleNameOverride) {
   // Validate required parameters
   if (!projectType) {
     throw new Error('Project type is required for detection');
@@ -297,7 +297,7 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
   let systemPrompt = '';
   let userMessage = '';
   let lineStats = null;
-  let moduleName = 'root';
+  let moduleName = moduleNameOverride || 'root';
   
   try {
     // Get file content
@@ -313,14 +313,16 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
     // 🔧 提前计算行数统计（确保有数据）
     lineStats = calculateLineStatistics(content);
     
-    // 🔧 提前提取模块名（改进逻辑）
-    const pathParts = fileInfo.path.split('/').filter(p => p && p !== '.');
-    // 如果路径只有一个部分（文件名），说明在根目录
-    if (pathParts.length === 1) {
-      moduleName = 'root';
-    } else {
-      // 否则使用第一个目录名作为模块名
-      moduleName = pathParts[0];
+    // 🔧 提前提取模块名（改进逻辑）；若上层已显式传入 moduleName（子模块名）则优先使用
+    if (!moduleNameOverride) {
+      const pathParts = fileInfo.path.split('/').filter(p => p && p !== '.');
+      // 如果路径只有一个部分（文件名），说明在根目录
+      if (pathParts.length === 1) {
+        moduleName = 'root';
+      } else {
+        // 否则使用第一个目录名作为模块名
+        moduleName = pathParts[0];
+      }
     }
 
     // If it's a .h file, try to find corresponding .cpp file (only for C++ projects)
@@ -395,6 +397,7 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
           projectType,
           headerRef,
           fileStructure,
+          moduleName: moduleNameOverride,
         });
         if (chunkResult && chunkResult.coverage) {
           const cov = chunkResult.coverage;
