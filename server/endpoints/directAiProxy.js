@@ -173,7 +173,7 @@ function directAiProxyEndpoints(app) {
             stream: body.stream !== false,
             temperature: typeof body.temperature === 'number' ? body.temperature : 0.7,
             options: {
-              num_ctx: body.options?.num_ctx || 32768
+              num_ctx: body.options?.num_ctx || 16384
             },
             // 代码检测默认开启思考（OLLAMA_THINK_CODEREVIEW），关闭前需先用
             // gui.h 等样本做 A/B 验证召回率，避免思维链缺失导致漏报。
@@ -195,7 +195,7 @@ function directAiProxyEndpoints(app) {
               stream: body.stream !== false,
               temperature: typeof body.temperature === 'number' ? body.temperature : 0.7,
               options: {
-                num_ctx: body.options?.num_ctx || 32768
+                num_ctx: body.options?.num_ctx || 16384
               },
               think: resolveThink('codereview')
             };

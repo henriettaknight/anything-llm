@@ -443,7 +443,9 @@ class ReportGenerationServiceImpl {
       'Risk',
       'HowToTrigger',
       'SuggestedFix',
-      'Confidence'
+      'Confidence',
+      'RiskLevel',
+      '机制校验'
     ];
     
     // "sep=\t" is an Excel-specific directive that tells Excel to use Tab as the
@@ -539,7 +541,9 @@ class ReportGenerationServiceImpl {
             risk,             // Already escaped above
             howToTrigger,     // Already escaped above
             this.escapeTSV(defectRecommendation),
-            this.escapeTSV(confidence)
+            this.escapeTSV(confidence),
+            this.escapeTSV(defect.riskLevel || ''),
+            this.escapeTSV(defect.mechanismNote || '')
           ];
           
           // Final safety check: ensure no objects in the row
@@ -630,7 +634,9 @@ class ReportGenerationServiceImpl {
               description: defect.description,
               risk: defect.risk, // 保留原始risk
               howToTrigger: defect.howToTrigger, // 保留原始howToTrigger
-              recommendation: defect.recommendation
+              recommendation: defect.recommendation,
+              riskLevel: defect.riskLevel || '', // 风险等级（P0/P1/P2/P3/Info）
+              mechanismNote: defect.mechanismNote || '' // 机制校验标记（COMPILE 兜底/事实库降级等）
             });
           }
         });
@@ -848,7 +854,7 @@ class ReportGenerationServiceImpl {
   _buildDefectRows(report, locale = 'zh') {
     const headers = [
       'No', 'Category', 'File', 'Function/Symbol',
-      'Snippet', 'Lines', 'Risk', 'HowToTrigger', 'SuggestedFix', 'Confidence'
+      'Snippet', 'Lines', 'Risk', 'HowToTrigger', 'SuggestedFix', 'Confidence', 'RiskLevel'
     ];
 
     const rows = [headers];
@@ -916,7 +922,9 @@ class ReportGenerationServiceImpl {
           this._xlsxCell(defectRisk),
           this._xlsxCell(defectHowToTrigger),
           this._xlsxCell(defectRecommendation),
-          confidence
+          confidence,
+          this._xlsxCell(defect.riskLevel || ''),
+          this._xlsxCell(defect.mechanismNote || '')
         ]);
       }
     }
@@ -1414,7 +1422,9 @@ class ReportGenerationServiceImpl {
         risk: defect.risk,
         howToTrigger: defect.howToTrigger,
         functionSymbol: defect.function,
-        snippet: defect.snippet
+        snippet: defect.snippet,
+        riskLevel: defect.riskLevel || '', // 风险等级（P0/P1/P2/P3/Info）
+        mechanismNote: defect.mechanismNote || '' // 机制校验标记（COMPILE 兜底/事实库降级等）
       });
     });
     

@@ -39,10 +39,28 @@ You are a senior C++ static analysis expert (standard/native C++, NOT Unreal Eng
   - howToTrigger: trigger/reproduction condition (English)
   - suggestedFix: minimally invasive fix (English)
   - confidence: High/Medium/Low
+  - riskLevel: risk level, one of P0/P1/P2/P3/Info (derived per the standard below; legacy P4 maps to Info)
   - **Line-number authenticity & uniqueness constraint**: `lines` must be a "real and unique" candidate line number that actually exists in the code block; **never fabricate non-existent line numbers**; within the same code block, do not emit contradictory or duplicate line numbers. If the exact line number cannot be determined, you may add an optional field `xline` (a single candidate absolute line number that must really exist in the code block) as a fallback; if `function` is empty, you may add an optional field `xfunc` (the function/class containing the defect, preferring the outermost function/class). These optional fields are only used when the main `lines`/`function` are missing.
   - **Recommended single-pass size**: about **1500 lines** per pass; overly large files are automatically split by the detection system into overlapping chunks. In chunked mode, the `L{n}:` prefix on each line is the original absolute line number of that file — copy it directly into `lines`, do not recount.
 - **Each distinct defect may be listed only once**: multiple call sites/branches hitting the same defect should each be a separate entry with its own real line number; do not list the same defect repeatedly.
 - If no defects are found, return an empty array [].
+
+## Risk Level Standard (riskLevel)
+
+Every defect MUST output a `riskLevel` field, restricted to **P0 / P1 / P2 / P3 / Info** (legacy `P4` maps to `Info`; no other levels allowed).
+Full standard: `prompts/shared/risk-level-standard.md`. Execution copy:
+
+| Level | Meaning |
+|-------|---------|
+| P0 | Blocking: crash / data corruption / privilege or injection / fatal network-sync error |
+| P1 | Clear correctness/resource defect: leak, state desync, out-of-bounds deref |
+| P2 | Performance/robustness hazard: missing debounce, resource not released but no leak |
+| P3 | Maintainability/style deviation: naming, duplication, magic numbers, missing types |
+| Info | Advisory suggestion, not a defect |
+
+C++ category guidance: MEMF/LEAK/ARRAY/SECURITY/NULL tend to P0–P1; OSRES/STL/COMPILE tend to P1–P2; PERF/DEPR/CLASS tend to P2–P3.
+**Derivation**: if both `severity` and `confidence` are given, use the `severity × confidence` matrix (critical→P0/P0/P1, major→P1/P1/P2, minor→P2/P3/P3, info→P3/Info/Info, for high/medium/low).
+**Hard rules**: downgrade when unsure; when `confidence: low`, `riskLevel` must NOT be P0.
 
 ## Example (MUST output only the JSON array)
 [
@@ -56,7 +74,8 @@ You are a senior C++ static analysis expert (standard/native C++, NOT Unreal Eng
     "risk": "acquire may return nullptr and is dereferenced, causing crash",
     "howToTrigger": "Buffer pool exhausted so acquire returns null",
     "suggestedFix": "Null-check before use: if (!buf) return -1; or use reference/smart pointer to guarantee non-null",
-    "confidence": "High"
+    "confidence": "High",
+    "riskLevel": "P1"
   },
   {
     "no": 2,
@@ -68,7 +87,8 @@ You are a senior C++ static analysis expert (standard/native C++, NOT Unreal Eng
     "risk": "data is not freed on early return when Parse fails, causing memory leak",
     "howToTrigger": "Parse fails and takes the early-return branch",
     "suggestedFix": "Use std::vector<char> or std::unique_ptr<char[]> for RAII auto-release",
-    "confidence": "High"
+    "confidence": "High",
+    "riskLevel": "P1"
   },
   {
     "no": 3,
@@ -80,6 +100,7 @@ You are a senior C++ static analysis expert (standard/native C++, NOT Unreal Eng
     "risk": "Iterator invalidated after erase but ++it continues, undefined behavior",
     "howToTrigger": "When an expired element is removed",
     "suggestedFix": "Use it = items_.erase(it); else ++it; do not increment on erase",
-    "confidence": "High"
+    "confidence": "High",
+    "riskLevel": "P1"
   }
 ]

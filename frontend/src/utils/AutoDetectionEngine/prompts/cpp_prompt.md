@@ -88,10 +88,28 @@
   - howToTrigger: 触发/重现条件（中文）
   - suggestedFix: 最小化入侵的修复建议（中文）
   - confidence: High/Medium/Low
+  - riskLevel: 风险等级，取值 P0/P1/P2/P3/Info（按下方「风险等级标准」派生；历史 P4 并入 Info）
   - **行号真实性与唯一约束**：`lines` 必须是代码块中"真实存在且唯一"的候选行号，**严禁编造不存在的行号**；同一代码块内不得出现相互矛盾的重复行号。若实在无法确定精确行号，可在对象中额外给出可选字段 `xline`（单个候选绝对行号，必须是代码块中真实存在的行号）作为回退；若 `function` 为空，可额外给出可选字段 `xfunc`（缺陷所在函数/类名，优先取所在最外层函数/类）。这些可选字段仅在主 `lines`/`function` 缺失时使用。
   - **单次送审规模建议**：推荐单次送审目标约 **1500 行**；超大文件会由检测系统自动切分为带重叠的小块分别送审，分块场景下代码块每行前缀的 `L{n}:` 即为该文件原始绝对行号，请直接照抄到 `lines`，不要重新计数。
 - **同一处缺陷只能列出一次**：多处调用点/多分支命中应各自独立成条并分别标注真实行号，禁止重复列出同一缺陷。
 - 若确实未发现缺陷，返回空数组 []。
+
+## 风险等级标准（riskLevel）
+
+每个缺陷必须输出 `riskLevel` 字段，取值严格限定为 **P0 / P1 / P2 / P3 / Info**（历史 `P4` 并入 `Info`，禁止其他等级）。
+完整标准见 `prompts/shared/risk-level-standard.md`，以下为执行副本：
+
+| 等级 | 含义 |
+|------|------|
+| P0 | 阻断性：崩溃/数据损坏/安全越权/网络同步致命错误 |
+| P1 | 明确正确性/资源缺陷：泄漏、状态不同步、越界解引用 |
+| P2 | 性能/健壮性隐患：未防抖、资源未及时释放但不泄漏 |
+| P3 | 可维护性/规范偏离：命名、重复、魔法数字、类型缺失 |
+| Info | 建议性提示，非缺陷 |
+
+C++ 类目本质定位参考：MEMF/LEAK/ARRAY/SECURITY/NULL 多为 P0–P1；OSRES/STL/COMPILE 多为 P1–P2；PERF/DEPR/CLASS 多为 P2–P3。
+**派生**：若同时给出 `severity` 与 `confidence`，按 `severity × confidence` 矩阵（critical→P0/P0/P1、major→P1/P1/P2、minor→P2/P3/P3、info→P3/Info/Info，对应 high/medium/low）。
+**硬约束**：宁降勿升；`confidence: low` 时 `riskLevel` 不得为 P0。
 
 ## 示例（务必仅输出 JSON 数组本身）
 [
@@ -105,7 +123,8 @@
     "risk": "acquire 失败返回 nullptr 时直接解引用，导致崩溃",
     "howToTrigger": "缓冲池耗尽时 acquire 返回空指针",
     "suggestedFix": "使用前判空: if (!buf) return -1; 或改用引用/智能指针保证非空",
-    "confidence": "High"
+    "confidence": "High",
+    "riskLevel": "P1"
   },
   {
     "no": 2,
@@ -117,7 +136,8 @@
     "risk": "Parse 失败提前返回时未释放 data，内存泄漏",
     "howToTrigger": "解析失败走 early return 分支",
     "suggestedFix": "改用 std::vector<char> 或 std::unique_ptr<char[]> 实现 RAII 自动释放",
-    "confidence": "High"
+    "confidence": "High",
+    "riskLevel": "P1"
   },
   {
     "no": 3,
@@ -129,7 +149,8 @@
     "risk": "erase 后迭代器失效仍继续 ++it，未定义行为",
     "howToTrigger": "存在已过期元素被删除时",
     "suggestedFix": "使用 it = items_.erase(it); 否则 ++it，删除时不自增",
-    "confidence": "High"
+    "confidence": "High",
+    "riskLevel": "P1"
   },
   {
     "no": 4,
@@ -141,7 +162,8 @@
     "risk": "取得 &attrs_[id] 后 push_back 可能触发 vector 扩容，a 变为过期指针，再写入是 use-after-free",
     "howToTrigger": "attrs_ 容量不足触发重新分配时",
     "suggestedFix": "先完成所有插入再取指针，或改用索引 attrs_[id].value += delta 访问",
-    "confidence": "High"
+    "confidence": "High",
+    "riskLevel": "P1"
   },
   {
     "no": 5,
@@ -153,7 +175,8 @@
     "risk": "传送消息直接携带真实坐标，违反协议约定（只能发坐标索引），存在被篡改/作弊风险",
     "howToTrigger": "客户端发起传送时构造该消息",
     "suggestedFix": "改为发送坐标索引：msg.set_coord_index(GetCoordIndex(actor->pos));",
-    "confidence": "Medium"
+    "confidence": "Medium",
+    "riskLevel": "P1"
   },
   {
     "no": 6,
@@ -165,6 +188,7 @@
     "risk": "ActorA::Setup 使用 ActorB 单例，但 ActorB 的初始化时机可能晚于此处，manager_ 可能未就绪",
     "howToTrigger": "ActorB 尚未完成初始化即触发 ActorA::Setup 时",
     "suggestedFix": "确保 ActorB 先于 ActorA 初始化，或在使用前校验 manager_ 就绪状态",
-    "confidence": "Low"
+    "confidence": "Low",
+    "riskLevel": "P2"
   }
 ]

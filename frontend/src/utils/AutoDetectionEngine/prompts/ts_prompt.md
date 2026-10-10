@@ -27,30 +27,32 @@
 
 ## 三、检测目标与优先级
 
-### 3.1 优先级定义
+### 3.1 风险等级定义（riskLevel）
 
-按以下优先级输出问题，P0 为最高。优先级以「**是否影响运行时正确性**」为第一准则，风格问题一律 P3+：
+> 完整标准见 `prompts/shared/risk-level-standard.md`，以下为本内核的执行副本。
 
-| 优先级 | 含义 | 示例 |
+按以下风险等级输出问题，P0 为最高。等级以「**是否影响运行时正确性**」为第一准则，风格问题一律 P3+：
+
+| 风险等级 | 含义 | 示例 |
 |------|------|------|
 | P0 | 阻断性缺陷：崩溃、数据损坏、沙箱越权、条件编译失效 | 运行时 `Cannot read of undefined`、跨进程直接写文件 |
 | P1 | 正确性缺陷：状态不同步、事件回调泄漏、撤销栈污染、类型断言掩盖错误 | `as any` 绕过校验导致数据结构错乱 |
 | P2 | 性能问题：不必要的重渲染、未 memo 的回调、大对象深拷贝 | 拖拽触发整树 re-render |
 | P3 | 可维护性：命名不一致、重复代码、魔法数字、缺失类型 | `Record<string, any>` 泛滥 |
-| P4 | 规范偏离：与项目命名/导出约定不符 | 新代码使用旧风格命名 |
+| Info | 规范偏离 / 建议性提示：与项目命名/导出约定不符、可选最佳实践 | 新代码使用旧风格命名 |
 
-### 3.2 priority 派生规则（severity × confidence）
+### 3.2 riskLevel 派生规则（severity × confidence）
 
-`priority` 字段必须由 `severity` 与 `confidence` 二维派生，模型不得直接任意指定：
+`riskLevel` 字段必须由 `severity` 与 `confidence` 二维派生，模型不得直接任意指定：
 
 | severity \ confidence | high | medium | low |
 |----------------------|------|--------|-----|
 | critical | P0 | P0 | P1 |
 | major | P1 | P1 | P2 |
 | minor | P2 | P3 | P3 |
-| info | P3 | P4 | P4 |
+| info | P3 | Info | Info |
 
-**防误报硬约束**：当 `confidence` 为 `low` 时，无论 `severity` 多高，`priority` 不得低于 P1（即低置信度的 critical 降为 P1，避免误报污染 P0）。
+**防误报硬约束**：当 `confidence` 为 `low` 时，无论 `severity` 多高，`riskLevel` 不得为 P0（矩阵已将其定为 critical+low→P1；其余按矩阵，不得臆造 P0 以避免误报污染）。历史 `P4` 已并入 `Info`。
 
 ---
 
@@ -88,9 +90,9 @@
 
 ### 5.2 类目表
 
-每类含定义、检测要点（可逐条对照的 checklist）与示例。`优先级区间` 列仅作快速定级参考，最终 `priority` 必须按 3.2 节派生规则计算。
+每类含定义、检测要点（可逐条对照的 checklist）与示例。`风险等级区间` 列仅作快速定级参考，最终 `riskLevel` 必须按 3.2 节派生规则计算。
 
-| 类目代码 | 中文名 | 优先级区间 |
+| 类目代码 | 中文名 | 风险等级区间 |
 |---------|--------|------|
 | TYPE | 类型安全 | P1-P3 |
 | REACT | React 缺陷 | P0-P2 |
@@ -607,13 +609,13 @@ nodesData.set(chapterId, cached); // 缓存与内存职责混淆
 1. **只报真实缺陷**：每个报告的缺陷必须有明确代码证据和具体出错场景。纯风格偏好（缩进、引号、分号）不计入缺陷。
 2. **低误报优先**：如无法确定是否为缺陷，不要报告。宁缺毋滥。
 3. **标注置信度**：每个缺陷给出 `confidence`（high/medium/low），反映把握程度。
-4. **priority 派生强制**：`priority` 必须按 3.2 节派生规则由 `severity × confidence` 计算，不得任意指定；`confidence: low` 时 `priority` 不得低于 P1。
+4. **riskLevel 派生强制**：`riskLevel` 必须按 3.2 节派生规则由 `severity × confidence` 计算，不得任意指定；`confidence: low` 时 `riskLevel` 不得为 P0。
 5. **单一归类**：每个缺陷只能归入一个 `category`，遵循五节「单一归类原则」——架构约束违反优先归 ARCH，通用技术问题归对应类目，不可双重归类，`by_category` 统计不重复计数。
 6. **给出修复建议**：每个缺陷附具体修复方向，而非泛泛而谈。
 7. **结合上下文**：判断须结合项目技术栈与架构约束（见「项目上下文」附加章节），不能用纯浏览器前端标准套用特定运行环境。
 8. **跨文件分析**：缺陷涉及多文件交互（store 被多处调用、类型定义与使用分离）时，尽可能关联分析。
 9. **关联设计文档**：对 ARCH 类目及 LOGIC 类目中的状态机/可达性/事件流程问题，须对照项目设计文档验证是否符合设计意图；如违反，在 `related_design` 字段引用具体章节。
-10. **不报告的类型**：代码风格/格式、命名偏好（除非导致实际 bug 或违反项目命名约定且为 P4）、注释缺失（除非逻辑无法理解）、被 `@ts-expect-error` 明确说明并合理抑制的。
+10. **不报告的类型**：代码风格/格式、命名偏好（除非导致实际 bug 或违反项目命名约定且为 Info）、注释缺失（除非逻辑无法理解）、被 `@ts-expect-error` 明确说明并合理抑制的。
 
 ---
 
@@ -626,7 +628,7 @@ nodesData.set(chapterId, cached); // 缓存与内存职责混淆
 5. **跨模块追踪**：对疑似问题（store 误用、事件未清理、子系统耦合）追踪调用链，确认影响范围。
 6. **条件编译验证**：对涉及条件编译的文件，分别检查各构建目标下可达性，确认各目标行为一致或差异符合预期。
 7. **设计文档对齐**：对 ARCH 类目及 LOGIC 类目中的状态机/可达性/事件流程问题，对照项目设计文档验证是否符合设计意图；如违反，在 `related_design` 字段引用具体章节。
-8. **验证缺陷与复检**：对每个疑似缺陷，确认其在真实运行时确实触发问题，排除误报；对已修改问题回归，确保未引入新问题。置信度低的如实标注，并据派生规则填入 `priority`。
+8. **验证缺陷与复检**：对每个疑似缺陷，确认其在真实运行时确实触发问题，排除误报；对已修改问题回归，确保未引入新问题。置信度低的如实标注，并据派生规则填入 `riskLevel`。
 
 ---
 
@@ -639,14 +641,14 @@ nodesData.set(chapterId, cached); // 缓存与内存职责混淆
   "summary": {
     "scope": "src/components/Game/caches/cacheStore.ts",
     "date": "2026-08-05",
-    "stats": { "P0": 1, "P1": 3, "P2": 2, "P3": 1, "P4": 0 },
+    "stats": { "P0": 1, "P1": 3, "P2": 2, "P3": 1, "Info": 0 },
     "by_category": { "REACT": 1, "ASYNC": 2, "ARCH": 1, "LEAK": 1, "SECURITY": 1, "ERR": 1 },
     "by_confidence": { "high": 4, "medium": 2, "low": 1 }
   },
   "issues": [
     {
       "category": "REACT",
-      "priority": "P0",
+      "riskLevel": "P0",
       "severity": "critical",
       "confidence": "high",
       "file": "src/components/Game/system/story-system/videoPlayer.tsx",
@@ -660,7 +662,7 @@ nodesData.set(chapterId, cached); // 缓存与内存职责混淆
     },
     {
       "category": "ARCH",
-      "priority": "P0",
+      "riskLevel": "P0",
       "severity": "critical",
       "confidence": "high",
       "file": "src/components/Editor/node-editor/timeline/widgets/timeline-toolbar.tsx",
@@ -684,14 +686,14 @@ nodesData.set(chapterId, cached); // 缓存与内存职责混淆
 
 | 字段 | 说明 |
 |------|------|
-| `summary` | 概览：检测范围、日期、按优先级/类目/置信度三维度统计 |
+| `summary` | 概览：检测范围、日期、按风险等级/类目/置信度三维度统计 |
 | `summary.scope` | 本次检测的文件/模块列表 |
 | `summary.date` | 检测日期（YYYY-MM-DD） |
-| `summary.stats` | 按 P0~P4 统计数量 |
+| `summary.stats` | 按 P0~P3 与 Info 统计数量 |
 | `summary.by_category` | 按 14 类目统计数量（遵循单一归类原则，不重复计数） |
 | `summary.by_confidence` | 按 high/medium/low 统计数量（low 单独计数，避免与 high 混淆） |
 | `issues[].category` | 类目代码：TYPE/REACT/ASYNC/STATE/LEAK/SECURITY/NULL/PERF/ERR/LOGIC/TAURI/I18N/DEP/ARCH |
-| `issues[].priority` | 优先级：P0/P1/P2/P3/P4，**由 severity × confidence 派生**（见 3.2 节） |
+| `issues[].riskLevel` | 风险等级：P0/P1/P2/P3/Info，**由 severity × confidence 派生**（见 3.2 节） |
 | `issues[].severity` | 严重程度：critical/major/minor/info |
 | `issues[].confidence` | 置信度：high/medium/low |
 | `issues[].file` | 缺陷文件相对路径 |
@@ -705,9 +707,9 @@ nodesData.set(chapterId, cached); // 缓存与内存职责混淆
 | `improvements` | 非问题的长效架构/规范建议 |
 | `recheck` | 复检记录（对已修复问题的回归结论，首次检测为空数组） |
 
-### priority 派生规则
+### riskLevel 派生规则
 
-`priority` 由 `severity × confidence` 派生（见 3.2），无需人工独立判断。当 `confidence` 为 `low` 时，无论 severity 多高，priority 不得低于 P1（低置信度的 critical 降为 P1，避免误报污染 P0）。
+`riskLevel` 由 `severity × confidence` 派生（见 3.2），无需人工独立判断。当 `confidence` 为 `low` 时，无论 severity 多高，`riskLevel` 不得为 P0（低置信度的 critical 降为 P1，避免误报污染 P0）。
 
 ---
 
@@ -715,7 +717,7 @@ nodesData.set(chapterId, cached); // 缓存与内存职责混淆
 
 1. **不得擅自修改源码**，仅输出 JSON 报告；如需提供修复示例，放在 `suggestion` 字段内。
 2. **不得臆测**：对未读到的代码不得假设其行为，需先用工具读取后再判断。
-3. **优先级判定**：以「是否影响运行时正确性」为第一准则，风格问题一律 P3+；`priority` 必须按派生规则计算，`confidence: low` 时不得为 P0。
+3. **风险等级判定**：以「是否影响运行时正确性」为第一准则，风格问题一律 P3+；`riskLevel` 必须按派生规则计算，`confidence: low` 时不得为 P0。
 4. **单一归类**：每个缺陷只能归入一个 `category`，遵循五节「单一归类原则」——架构约束违反优先归 ARCH，通用技术问题归对应类目，不可双重归类，`by_category` 统计不重复计数。
 5. **语言**：`title` / `description` / `suggestion` 使用中文，`code_snippet` 保留原文。
 6. **引用**：`file` 字段必须为相对路径，`lines` 必须准确；`rule` 字段必须填写三段式规则引用，便于回溯。

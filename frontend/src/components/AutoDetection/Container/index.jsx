@@ -115,6 +115,7 @@ export default function AutoDetectionContainer() {
         directory: config.targetDirectory || "",
         detectionTime: config.detectionTime || "",
         projectType: config.projectType || "",
+        projectConventions: config.projectConventions || "",
         enabled: config.enabled || false,
       });
     } catch (error) {
@@ -257,6 +258,7 @@ export default function AutoDetectionContainer() {
         targetDirectory: newConfig.directory || "",
         detectionTime: newConfig.detectionTime || "",
         projectType: newConfig.projectType || "",
+        projectConventions: newConfig.projectConventions || "",
         enabled: newConfig.enabled || false,
         fileTypes: newConfig.fileTypes || (['ts', 'ts_famegame'].includes(newConfig.projectType) ? ['.ts', '.tsx', '.js', '.jsx'] : ['.h', '.cpp', '.c', '.hpp', '.cc']),
         excludePatterns: newConfig.excludePatterns || [

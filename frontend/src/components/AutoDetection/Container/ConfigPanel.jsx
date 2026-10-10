@@ -9,6 +9,7 @@ export default function ConfigPanel({ config, onSave, isSaving, onOutputConfigCh
     directory: config?.directory || "",
     detectionTime: config?.detectionTime || "",
     projectType: config?.projectType || "", // 空字符串表示未选择
+    projectConventions: config?.projectConventions || "", // 项目约定（误报治理第 2 层）
   });
   const [errors, setErrors] = useState({});
   const [successMessage, setSuccessMessage] = useState("");
@@ -52,6 +53,7 @@ export default function ConfigPanel({ config, onSave, isSaving, onOutputConfigCh
         directory: config.directory || "",
         detectionTime: config.detectionTime || "",
         projectType: config.projectType || "",
+        projectConventions: config.projectConventions || "",
       });
     }
   }, [config]);
@@ -235,6 +237,7 @@ export default function ConfigPanel({ config, onSave, isSaving, onOutputConfigCh
       directory: formData.directory,
       detectionTime: formData.detectionTime,
       projectType: formData.projectType,
+      projectConventions: formData.projectConventions || "",
       enabled: true,
       fileTypes: ['ts', 'ts_famegame'].includes(formData.projectType)
         ? ['.ts', '.tsx', '.js', '.jsx']
@@ -474,6 +477,32 @@ export default function ConfigPanel({ config, onSave, isSaving, onOutputConfigCh
             {t(
               "autodetection.config.projectTypeHint",
               "Select the type of project to use the appropriate detection rules"
+            )}
+          </p>
+        </div>
+
+        {/* Project Conventions (误报治理第 2 层) */}
+        <div>
+          <label className="block text-sm font-medium text-theme-text-primary mb-2">
+            {t("autodetection.config.projectConventions", "项目约定（抑制误报）")}
+          </label>
+          <textarea
+            value={formData.projectConventions || ""}
+            onChange={(e) =>
+              setFormData((prev) => ({ ...prev, projectConventions: e.target.value }))
+            }
+            disabled={isSaving}
+            rows={4}
+            placeholder={t(
+              "autodetection.config.projectConventionsPlaceholder",
+              "每行一条，例如：\nGetWorld() 在 Tick/BeginPlay 语境恒非空\n地形及地形子 Component 由引擎保证\nXxxFunc 的所有调用方均已判空 YyyParam"
+            )}
+            className="w-full px-3 py-2 bg-theme-bg-primary border border-theme-sidebar-border rounded text-theme-text-primary focus:outline-none focus:ring-2 focus:ring-theme-accent-primary disabled:opacity-50 font-mono text-sm"
+          />
+          <p className="mt-1 text-xs text-theme-text-secondary">
+            {t(
+              "autodetection.config.projectConventionsHint",
+              "项目方声明的非空/安全约定（nonnullConventions / castSafety / callerGuarantees），将注入检测 prompt 以抑制对应误报"
             )}
           </p>
         </div>

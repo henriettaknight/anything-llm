@@ -7,6 +7,7 @@
  */
 
 import { detectUserLanguage } from './languageDetector.js';
+import { normalizeRiskLevel } from './riskLevel.js';
 
 /**
  * @typedef {Object} DetectionDefect
@@ -20,6 +21,7 @@ import { detectUserLanguage } from './languageDetector.js';
  * @property {string} howToTrigger - How to trigger the defect
  * @property {string} suggestedFix - Suggested fix
  * @property {string} confidence - Confidence level (High/Medium/Low)
+ * @property {string} [riskLevel] - Risk level (P0/P1/P2/P3/Info)
  */
 
 /**
@@ -199,6 +201,7 @@ export function parseDetectionResults(response) {
     howToTrigger: normalize(item.howToTrigger ?? item.how_to_trigger ?? ''),
     suggestedFix: normalize(item.suggestedFix ?? item.suggested_fix ?? item.suggestedfix ?? ''),
     confidence: normalize(item.confidence ?? item.Confidence ?? 'Medium'),
+    riskLevel: normalizeRiskLevel(item.riskLevel ?? item.priority ?? item.risk_level ?? ''),
   });
 
   try {
@@ -278,6 +281,7 @@ function parseMarkdownTable(response) {
           howToTrigger: cells[7],
           suggestedFix: cells[8],
           confidence: cells[9],
+          riskLevel: '',
         });
       }
     }

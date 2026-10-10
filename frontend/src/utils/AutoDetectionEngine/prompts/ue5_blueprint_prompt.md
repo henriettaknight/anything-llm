@@ -373,10 +373,33 @@
 9. **Get Component 返回的组件（如果组件在编辑器中已添加）**
 10. **蓝图编译器已验证的节点连接**
 
-## 审查深度与优先级
-- P0：会导致崩溃/空引用/网络同步错误（NULL/REPLICATE/COMPILE）
-- P1：严重性能问题或资源泄漏（TICK/LOOP/RESOURCE/REF）
-- P2：架构问题或最佳实践（INTERFACE/UI/ANIM/CAST）
+## 风险等级标准（riskLevel）
+
+每个缺陷必须输出 `riskLevel` 字段，取值严格限定为 **P0 / P1 / P2 / P3 / Info**（历史 `P4` 并入 `Info`，禁止其他等级）。
+完整标准见 `prompts/shared/risk-level-standard.md`，以下为执行副本：
+
+| 等级 | 含义 |
+|------|------|
+| P0 | 阻断性：崩溃/空引用/网络同步致命错误（NULL/REPLICATE/COMPILE） |
+| P1 | 严重性能问题或资源泄漏（TICK/LOOP/RESOURCE/REF） |
+| P2 | 架构问题或最佳实践（INTERFACE/UI/ANIM/CAST） |
+| P3 | 可维护性/规范偏离：命名、重复、魔法数字 |
+| Info | 建议性提示，非缺陷 |
+
+**派生**：若同时给出 `severity` 与 `confidence`，按 `severity × confidence` 矩阵（critical→P0/P0/P1、major→P1/P1/P2、minor→P2/P3/P3、info→P3/Info/Info，对应 high/medium/low）。
+**硬约束**：宁降勿升；`confidence: low` 时 `riskLevel` 不得为 P0。
+
+## UE 误报硬规则（执行副本，须与 shared/risk-level-standard.md 同步）
+
+1. **COMPILE 类封禁**：本项目当前可正常构建。禁止输出"必然编译错误/编译失败/无法编译"类结论；语法/API 疑虑（引擎版本差异、定制扩展、自定义基类成员）一律转报语义类别，并注明"疑似引擎版本/私有扩展差异，需人工确认"。
+2. **UObject 零初始化**：UObject 成员由反射/GC 系统零初始化；只对栈上对象或非 UObject 类型报"未初始化/随机值"。
+3. **引擎不变量对象非空**：GEngine / GameMode / GameState / PlayerController / 默认子对象组件等引擎保证存在的对象，不报"可能为空/未判空崩溃"。
+4. **继承间 C 风格转换安全**：有继承关系的类型间 C 风格强制转换等价于 `static_cast` 语义，不报"偏移错误/崩溃"，除非有确凿证据真实类型不符。
+5. **浮点除零非崩溃**：UE 关闭 FPU 异常，浮点除零产生 NaN/Inf 而非崩溃；标"NaN 传播"不标"崩溃"。
+6. **check() 非缺陷**：`check()` / `ensure()` 是开发期断言，至多 Info，不报缺陷。
+7. **WidgetTree 子控件不缺 UPROPERTY**：WidgetTree 持有的子控件由 UMG 系统管理，不缺 UPROPERTY；只有跨对象/跨资源引用才有 GC 风险。
+8. **短路求值保护**：`A && A->B` 中 `A` 已判空保护后，`A->B` 不报空解引用。
+9. **函数返回指针即调成员低风险**：函数返回指针后直接调用其成员默认 P3，不报 P0/P1。
 
 ## 输出报告格式（请严格遵循）
 无论送审内容是蓝图节点还是 C++ 源文件，都必须以 **JSON 数组** 输出（与标准 C++ 检测完全一致，不要输出 Markdown 表格）。数组内每个对象字段如下（全部必填）：
@@ -390,6 +413,7 @@
 - howToTrigger: 触发/重现条件
 - suggestedFix: 最小化入侵修复建议
 - confidence: High/Medium/Low
+- riskLevel: 风险等级，取值 P0/P1/P2/P3/Info（按上方「风险等级标准」派生；历史 P4 并入 Info）
 - **行号真实性与唯一约束（仅 C++ 源文件缺陷）**：`lines` 必须是代码块中"真实存在且唯一"的候选行号，**严禁编造不存在的行号**；同一代码块内不得出现相互矛盾的重复行号。若实在无法确定精确行号，可额外给出可选字段 `xline`（单个候选绝对行号，必须是代码块中真实存在的行号）作为回退；若 `function` 为空，可额外给出可选字段 `xfunc`（缺陷所在函数/类名，优先取所在最外层函数/类）。这些可选字段仅在主 `lines`/`function` 缺失时使用。蓝图节点缺陷此约束不适用（`lines` 填 "N/A"）。
 - **单次送审规模建议**：C++ 源文件推荐单次送审目标约 **1500 行**，超大文件由检测系统自动切分为带重叠的小块分别送审；蓝图节点推荐单次送审单个蓝图资产或单个图表。
 - **同一处缺陷只能列出一次**：多处调用点/多分支命中应各自独立成条并分别标注真实行号（C++）或节点路径（蓝图），禁止重复列出同一缺陷。
@@ -397,13 +421,13 @@
 示例（C++ 源文件缺陷）：
 ```json
 [
-  {"no":1,"category":"ARRAY","file":"Source/MyProject/MyActor.cpp","function":"AMyActor::Tick","snippet":"for(int i=0;i<Arr.Num();i++){ Arr[i].Process(); }","lines":"L120","risk":"越界风险","howToTrigger":"Arr 为空时访问","suggestedFix":"循环前判空","confidence":"High"}
+  {"no":1,"category":"ARRAY","file":"Source/MyProject/MyActor.cpp","function":"AMyActor::Tick","snippet":"for(int i=0;i<Arr.Num();i++){ Arr[i].Process(); }","lines":"L120","risk":"越界风险","howToTrigger":"Arr 为空时访问","suggestedFix":"循环前判空","confidence":"High","riskLevel":"P1"}
 ]
 ```
 示例（蓝图节点缺陷）：
 ```json
 [
-  {"no":1,"category":"NULL","file":"Content/Blueprints/Characters/BP_Player","function":"Event BeginPlay","snippet":"Get Pawn 后直接调用 Set Actor Location","lines":"N/A","risk":"空引用崩溃","howToTrigger":"Pawn 未生成时调用","suggestedFix":"在 Get Pawn 后添加 IsValid 检查","confidence":"High"}
+  {"no":1,"category":"NULL","file":"Content/Blueprints/Characters/BP_Player","function":"Event BeginPlay","snippet":"Get Pawn 后直接调用 Set Actor Location","lines":"N/A","risk":"空引用崩溃","howToTrigger":"Pawn 未生成时调用","suggestedFix":"在 Get Pawn 后添加 IsValid 检查","confidence":"High","riskLevel":"P0"}
 ]
 ```
 

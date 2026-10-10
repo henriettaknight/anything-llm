@@ -5,6 +5,8 @@
 
 import { getFileContent } from './fileMonitorService.js';
 import { createAIAdapter } from '../utils/aiAdapter.js';
+import { normalizeRiskLevel } from '../utils/riskLevel.js';
+import { applyMechanismValidation } from '../utils/mechanismValidator.js';
 import {
   formatDetectionPrompt,
   parseDetectionResults,
@@ -15,6 +17,116 @@ import {
 } from '../utils/promptFormatter.js';
 import { detectUserLanguage } from '../utils/languageDetector.js';
 import tokenStatisticsService from './tokenStatisticsService.js';
+
+// 误报治理第 4 层：所有解析分支产出的缺陷统一过机制校验（COMPILE 兜底 + 事实库联动降级）。
+// 定义为模块级，确保非 TS 项目（如 ue_cpp）的 JSON/表格/列表等分支也能使用，
+// 否则这些分支调用 finalize 会因作用域问题抛 ReferenceError: finalize is not defined 导致空报告。
+// 合法 category 枚举（与表格/列表/中文表格解析路径保持一致）
+const VALID_DEFECT_CATEGORIES = new Set([
+  'AUTO', 'ARRAY', 'MEMF', 'LEAK', 'OSRES', 'STL', 'DEPR',
+  'PERF', 'CLASS', 'COMPILE', 'SECURITY', 'SEQ', 'INITORD',
+]);
+
+// 从 risk 文本启发式推断风险等级（模型有时只给 high/medium/low 而不给 riskLevel）
+function inferRiskLevel(riskRaw) {
+  if (!riskRaw) return '';
+  const r = String(riskRaw).toLowerCase();
+  if (/p0|critical|致命|严重/.test(r)) return 'P0';
+  if (/p1|high|高/.test(r)) return 'P1';
+  if (/p2|medium|中/.test(r)) return 'P2';
+  if (/p3|low|低/.test(r)) return 'P3';
+  if (/info/.test(r)) return 'Info';
+  return '';
+}
+
+// 类别默认风险等级：模型完全漏填 riskLevel 时，按类别给一个合理兜底，
+// 避免 Excel 出现空洞行（如 MEMF/LEAK/ARRAY/SECURITY 多为 P1，PERF/CLASS/DEPR 多为 P3）。
+function categoryDefaultRiskLevel(category) {
+  const cat = String(category || '').trim().toUpperCase();
+  const map = {
+    MEMF: 'P1', LEAK: 'P1', ARRAY: 'P1', SECURITY: 'P1',
+    OSRES: 'P2', STL: 'P2', COMPILE: 'P2', AUTO: 'P2', SEQ: 'P1', INITORD: 'P1',
+    PERF: 'P3', CLASS: 'P3', DEPR: 'P3',
+  };
+  return map[cat] || 'Info';
+}
+
+// 归一化 snippet 用于跨采样/跨块去重：去注释、压空白、转小写
+function normalizeSnippetKey(snippet) {
+  return String(snippet || '')
+    .replace(/\/\/.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+// 解析伪影识别：模型偶发把 Markdown 说明文字（标题/加粗/代码围栏，如
+// "### Summary of Changes"、"**Replaced"、"```cpp"）当 snippet 输出，
+// 或 function 字段填成裸语言关键字（如 "if"）。这些都不是真实缺陷，直接丢弃。
+const PARSE_ARTIFACT_SNIPPET_RE = /^\s*#{1,6}\s|```|^\s*\*\*[^*\n]/;
+const KEYWORD_FUNCTIONS = new Set([
+  'if', 'else', 'for', 'while', 'switch', 'case', 'do', 'try', 'catch',
+  'return', 'break', 'continue', 'goto', 'new', 'delete', 'default',
+]);
+function isParseArtifact(d) {
+  const snippet = String(d.snippet || '');
+  if (PARSE_ARTIFACT_SNIPPET_RE.test(snippet)) return true;
+  const fn = String(d.function || '').trim().toLowerCase();
+  if (KEYWORD_FUNCTIONS.has(fn)) return true;
+  return false;
+}
+
+// 统一出口：机制校验 + 脏数据过滤 + 字段补全
+//  - 过滤：无 snippet（无法定位代码）或无 lines（无行号）的条目为无效脏数据，直接丢弃
+//  - 补全：riskLevel 缺失时依次用 normalizeRiskLevel / inferRiskLevel / 类别默认等级 兜底，避免 Excel 出现空洞行
+//  - 去重：同文件 + 同归一化行号 + 同归一化 snippet 视为同一缺陷（跨采样/跨块合并）
+const finalize = (arr) => {
+  const validated = (arr || []).map(applyMechanismValidation);
+
+  const kept = validated.filter(
+    (d) =>
+      d &&
+      String(d.snippet || '').trim() !== '' &&
+      String(d.lines || '').trim() !== '' &&
+      !isParseArtifact(d)
+  );
+
+  const mapped = kept.map((d) => {
+    const category = String(d.category || '').trim().toUpperCase();
+    const normCategory = VALID_DEFECT_CATEGORIES.has(category)
+      ? category
+      : mapMarkdownIssueToCategory(
+          d.category || '',
+          `${d.risk || ''} ${d.snippet || ''} ${d.suggestedFix || ''}`
+        ) || category || 'CLASS';
+    return {
+      ...d,
+      category: normCategory,
+      lines: String(d.lines || '').trim(),
+      howToTrigger: String(d.howToTrigger || '').trim() || 'N/A',
+      suggestedFix: String(d.suggestedFix || '').trim() || 'N/A',
+      riskLevel:
+        normalizeRiskLevel(d.riskLevel) ||
+        inferRiskLevel(d.risk) ||
+        categoryDefaultRiskLevel(normCategory) ||
+        'Info',
+    };
+  });
+
+  // 跨采样/跨块去重：同文件 + 同归一化行号 + 同归一化 snippet 视为同一缺陷
+  const seen = new Set();
+  return mapped.filter((d) => {
+    const digits = String(d.lines || '').replace(/[^0-9]/g, '');
+    const key = `${String(d.file || '')
+      .split(/[\\/]/)
+      .pop()
+      .toLowerCase()}|${digits}|${normalizeSnippetKey(d.snippet)}`;
+    if (!digits || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
 
 /**
  * @typedef {Object} DefectDetectionResult
@@ -101,6 +213,58 @@ export function getCodeReviewAIService() {
  */
 export function getServerLog() {
   return serverLog;
+}
+
+/**
+ * 把项目约定注入 system prompt 尾部（编号列表 + 标题"本项目约定清单"）。
+ * 无约定 / 空 / 仅空白 → 原样返回。
+ */
+export function appendProjectConventions(systemPrompt) {
+  const conventions = readProjectConventionsFromStorage();
+  if (!conventions || typeof conventions !== 'string') return systemPrompt;
+  const lines = conventions
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) return systemPrompt;
+  const list = lines
+    .map((l, i) => `${i + 1}. ${l} [${classifyConvention(l)}]`)
+    .join('\n');
+  return `${systemPrompt}\n\n## 本项目约定清单（必须遵守）\n${list}\n`;
+}
+
+/**
+ * 读取用户在 ConfigPanel 中保存的项目约定（nonnullConventions / castSafety / callerGuarantees 的扁平化列表）。
+ * 存于 localStorage['autoDetection_config'].projectConventions（字符串，换行分隔）。
+ * 容错：无配置 / 空 / 坏 JSON / 非字符串 / 旧配置无字段 → 返回 ''。
+ */
+export function readProjectConventionsFromStorage() {
+  try {
+    if (typeof localStorage === 'undefined') return '';
+    const raw = localStorage.getItem('autoDetection_config');
+    if (!raw) return '';
+    const cfg = JSON.parse(raw);
+    if (!cfg || typeof cfg.projectConventions !== 'string') return '';
+    return cfg.projectConventions;
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * 将项目约定归类为 nonnull / cast / caller 三类，对应误报治理第 2/3 层：
+ * - 调用链保证（callerGuarantees）：声明"调用方已判空"等已知调用关系，等价于第 3 层粗粒度抑制
+ * - 转换安全（castSafety）
+ * - 非空约定（nonnullConventions）
+ */
+function classifyConvention(line) {
+  if (/调用方|调用处|caller|所有调用|调用.*已判空|调用.*非\s*null|调用.*非空/i.test(line)) {
+    return '调用链保证';
+  }
+  if (/转换|cast|强制|reinterpret|static_cast|安全转换|指针.*安全/i.test(line)) {
+    return '转换安全';
+  }
+  return '非空约定';
 }
 
 /**
@@ -415,6 +579,8 @@ export async function detectDefectsInFile(fileInfo, directoryHandle, projectType
 
     // Get system prompt (must pass projectType)
     systemPrompt = await getUEDefectDetectionPrompt(projectType);
+    // 误报治理第 2 层：注入项目约定（nonnullConventions/castSafety/callerGuarantees）
+    systemPrompt = appendProjectConventions(systemPrompt);
     serverLog?.info(`提示词长度: ${systemPrompt.length} 字符`);
     
     // Detect user language for user message
@@ -632,7 +798,7 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
             [
               ...messageHistory,
               { role: 'user', content: (projectType === 'ts' || projectType === 'ts_famegame')
-                ? '你已经拿到了完整代码。不要重复说明规则、不要索要代码、不要前言。现在仅返回 JSON 对象（不要返回数组）：{"summary":{"scope":string,"by_category":{},"by_confidence":{}},"issues":[{category,priority,severity,confidence,file,lines,rule,title,description,suggestion,code_snippet,related_design}],"improvements":[],"recheck":[]}。issues 可为空数组。'
+                ? '你已经拿到了完整代码。不要重复说明规则、不要索要代码、不要前言。现在仅返回 JSON 对象（不要返回数组）：{"summary":{"scope":string,"by_category":{},"by_confidence":{}},"issues":[{category,riskLevel,severity,confidence,file,lines,rule,title,description,suggestion,code_snippet,related_design}],"improvements":[],"recheck":[]}。issues 可为空数组。'
                 : '你已经拿到了完整代码。不要重复说明规则、不要索要代码、不要前言。现在仅返回 JSON 数组（可为空数组），字段固定：no, category, file, function, snippet, lines, risk, howToTrigger, suggestedFix, confidence。' }
             ],
             { signal: retryAbort.signal }
@@ -678,7 +844,7 @@ Note: each line in the block is prefixed with its real line number; for \`lines\
       }
     }
 
-    return defects;
+    return finalize(defects);
 
   } catch (error) {
     serverLog?.error(`检测文件 ${fileInfo.path} 时发生错误:`, error);
@@ -884,7 +1050,7 @@ export function parseDefectDetectionResults(response, filePath, projectType) {
     console.log('  ✓ AI explicitly stated: No defects found');
     console.log('🔧'.repeat(40) + '\n');
     serverLog?.info('AI检测结果：未发现缺陷');
-    return defects;
+    return finalize(defects);
   }
   
   // ===== TS 对象格式分支（projectType 以 'ts' 开头）=====
@@ -922,6 +1088,7 @@ export function parseDefectDetectionResults(response, filePath, projectType) {
             confidence: capitalize(item.confidence || 'medium'), // high/medium/low → High/Medium/Low
             priority: item.priority || '',
             severity: item.severity || '',
+            riskLevel: normalizeRiskLevel(item.riskLevel ?? item.priority),
             rule: item.rule || '',
             relatedDesign: item.related_design || null,
             title: item.title || '',
@@ -929,7 +1096,7 @@ export function parseDefectDetectionResults(response, filePath, projectType) {
           }));
           console.log(`  ✅ TS object parsed: ${tsDefects.length} defects`);
           console.log('🔧'.repeat(40) + '\n');
-          return tsDefects;
+          return finalize(tsDefects);
         }
       }
     } catch (e) {
@@ -964,12 +1131,13 @@ export function parseDefectDetectionResults(response, filePath, projectType) {
           howToTrigger: item.howToTrigger || '',
           suggestedFix: item.suggestedFix || '',
           confidence: item.confidence || 'Medium',
+          riskLevel: normalizeRiskLevel(item.riskLevel ?? item.priority),
           xline: typeof item.xline === 'number' ? item.xline : (typeof item.xline === 'string' ? parseInt(item.xline, 10) || 0 : 0),
           xfunc: item.xfunc || '',
         }));
         console.log(`  ✅ JSON array parsed: ${jsonDefects.length} defects`);
         console.log('🔧'.repeat(40) + '\n');
-        return jsonDefects;
+        return finalize(jsonDefects);
       }
     }
   } catch (e) {
@@ -991,10 +1159,11 @@ export function parseDefectDetectionResults(response, filePath, projectType) {
             howToTrigger: item.howToTrigger || '',
             suggestedFix: item.suggestedFix || '',
             confidence: item.confidence || 'Medium',
+          riskLevel: normalizeRiskLevel(item.riskLevel ?? item.priority),
           }));
           console.log(`  ✅ JSON array parsed (regex fallback): ${jsonDefects.length} defects`);
           console.log('🔧'.repeat(40) + '\n');
-          return jsonDefects;
+          return finalize(jsonDefects);
         }
       }
     } catch (e2) {
@@ -1072,7 +1241,7 @@ export function parseDefectDetectionResults(response, filePath, projectType) {
       console.log('  - Sample defect:', JSON.stringify(defects[0], null, 2));
       console.log('🔧'.repeat(40) + '\n');
       serverLog?.info(`成功解析 ${defects.length} 个英文表格格式缺陷`);
-      return defects;
+      return finalize(defects);
     } else {
       console.log('  ⚠️ Table found but no valid defects parsed');
     }
@@ -1087,7 +1256,7 @@ export function parseDefectDetectionResults(response, filePath, projectType) {
     console.log(`  ✅ Successfully parsed ${chineseTableDefects.length} defects from Chinese table`);
     console.log('🔧'.repeat(40) + '\n');
     serverLog?.info(`成功解析 ${chineseTableDefects.length} 个中文表格格式缺陷`);
-    return chineseTableDefects;
+    return finalize(chineseTableDefects);
   }
   
   console.log('  🔍 Trying list format...');
@@ -1097,7 +1266,7 @@ export function parseDefectDetectionResults(response, filePath, projectType) {
     console.log(`  ✅ Successfully parsed ${listDefects.length} defects from list format`);
     console.log('🔧'.repeat(40) + '\n');
     serverLog?.info(`成功解析 ${listDefects.length} 个列表格式缺陷`);
-    return listDefects;
+    return finalize(listDefects);
   }
 
   console.log('  🔍 Trying structured markdown format...');
@@ -1107,7 +1276,7 @@ export function parseDefectDetectionResults(response, filePath, projectType) {
     console.log(`  ✅ Successfully parsed ${markdownDefects.length} defects from markdown format`);
     console.log('🔧'.repeat(40) + '\n');
     serverLog?.info(`成功解析 ${markdownDefects.length} 个Markdown结构化缺陷`);
-    return markdownDefects;
+    return finalize(markdownDefects);
   }
   
   console.log('  🔍 Trying loose format matching...');
@@ -1117,7 +1286,7 @@ export function parseDefectDetectionResults(response, filePath, projectType) {
     console.log(`  ✅ Successfully parsed ${looseDefects.length} defects from loose format`);
     console.log('🔧'.repeat(40) + '\n');
     serverLog?.info(`成功解析 ${looseDefects.length} 个宽松格式缺陷`);
-    return looseDefects;
+    return finalize(looseDefects);
   }
   
   console.log('  ❌ No defects found in any format');
@@ -1447,7 +1616,7 @@ function parseChineseTableFormat(response, filePath) {
   // Match Chinese table rows - look for patterns like | 缺陷类别 | 行号 | 说明 |
   const tableMatch = response.match(/\|.*\|.*\|.*\|.*\|/g);
   if (!tableMatch || tableMatch.length < 2) {
-    return defects;
+    return finalize(defects);
   }
   
   // Find header row to understand column mapping
@@ -1463,7 +1632,7 @@ function parseChineseTableFormat(response, filePath) {
   }
   
   if (headerIndex === -1) {
-    return defects;
+    return finalize(defects);
   }
   
   // Parse data rows (skip header and separator)
@@ -1619,7 +1788,7 @@ function parseStructuredMarkdownDefects(response, filePath) {
   const headers = Array.from(response.matchAll(issueHeaderRegex));
 
   if (!headers.length) {
-    return defects;
+    return finalize(defects);
   }
 
   for (let i = 0; i < headers.length; i++) {

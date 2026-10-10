@@ -375,10 +375,21 @@ Only report the following 6 situations where objects may be null and unchecked:
 10. **Node connections validated by Blueprint compiler**
 
 
-## Review Depth and Priority
-- P0: Will cause crash/null reference/network sync error (NULL/REPLICATE/COMPILE)
-- P1: Severe performance issues or resource leaks (TICK/LOOP/RESOURCE/REF)
-- P2: Architecture issues or best practices (INTERFACE/UI/ANIM/CAST)
+## Risk Level Standard (riskLevel)
+
+Every defect MUST output a `riskLevel` field, restricted to **P0 / P1 / P2 / P3 / Info** (legacy `P4` maps to `Info`; no other levels allowed).
+Full standard: `prompts/shared/risk-level-standard.md`. Execution copy:
+
+| Level | Meaning |
+|-------|---------|
+| P0 | Blocking: crash / null reference / fatal network-sync error (NULL/REPLICATE/COMPILE) |
+| P1 | Severe performance issues or resource leaks (TICK/LOOP/RESOURCE/REF) |
+| P2 | Architecture issues or best practices (INTERFACE/UI/ANIM/CAST) |
+| P3 | Maintainability/style deviation: naming, duplication, magic numbers |
+| Info | Advisory suggestion, not a defect |
+
+**Derivation**: if both `severity` and `confidence` are given, use the `severity × confidence` matrix (critical→P0/P0/P1, major→P1/P1/P2, minor→P2/P3/P3, info→P3/Info/Info, for high/medium/low).
+**Hard rules**: downgrade when unsure; when `confidence: low`, `riskLevel` must NOT be P0.
 
 ## Output Report Format (Strictly Follow)
 Whether the submitted content is a Blueprint node or a C++ source file, you MUST output a **JSON array** (exactly consistent with standard C++ detection; do not output a Markdown table). Each object in the array must include all of the following fields:
@@ -392,6 +403,7 @@ Whether the submitted content is a Blueprint node or a C++ source file, you MUST
 - howToTrigger: trigger/reproduction condition
 - suggestedFix: minimally invasive fix suggestion
 - confidence: High/Medium/Low
+- riskLevel: risk level, one of P0/P1/P2/P3/Info (derived per the standard above; legacy P4 maps to Info)
 - **Line-number authenticity & uniqueness constraint (C++ source defects only)**: `lines` must be a "real and unique" candidate line number that actually exists in the code block; **never fabricate non-existent line numbers**; within the same code block, do not emit contradictory or duplicate line numbers. If the exact line number cannot be determined, you may add an optional field `xline` (a single candidate absolute line number that must really exist in the code block) as a fallback; if `function` is empty, you may add an optional field `xfunc` (the function/class containing the defect, preferring the outermost function/class). These optional fields are only used when the main `lines`/`function` are missing. This constraint does not apply to Blueprint node defects (`lines` = "N/A").
 - **Recommended single-pass size**: about **1500 lines** per pass for C++ source; overly large files are automatically split by the detection system into overlapping chunks. For Blueprint nodes, prefer a single Blueprint asset or a single graph per pass.
 - **Each distinct defect may be listed only once**: multiple call sites/branches hitting the same defect should each be a separate entry with its own real line number (C++) or node path (Blueprint); do not list the same defect repeatedly.
@@ -399,13 +411,13 @@ Whether the submitted content is a Blueprint node or a C++ source file, you MUST
 Example (C++ source defect):
 ```json
 [
-  {"no":1,"category":"ARRAY","file":"Source/MyProject/MyActor.cpp","function":"AMyActor::Tick","snippet":"for(int i=0;i<Arr.Num();i++){ Arr[i].Process(); }","lines":"L120","risk":"Out-of-bounds risk","howToTrigger":"When Arr is empty","suggestedFix":"Null-check before loop","confidence":"High"}
+  {"no":1,"category":"ARRAY","file":"Source/MyProject/MyActor.cpp","function":"AMyActor::Tick","snippet":"for(int i=0;i<Arr.Num();i++){ Arr[i].Process(); }","lines":"L120","risk":"Out-of-bounds risk","howToTrigger":"When Arr is empty","suggestedFix":"Null-check before loop","confidence":"High","riskLevel":"P1"}
 ]
 ```
 Example (Blueprint node defect):
 ```json
 [
-  {"no":1,"category":"NULL","file":"Content/Blueprints/Characters/BP_Player","function":"Event BeginPlay","snippet":"Get Pawn followed by direct call to Set Actor Location","lines":"N/A","risk":"Null reference crash","howToTrigger":"Called when Pawn not spawned","suggestedFix":"Add IsValid check after Get Pawn","confidence":"High"}
+  {"no":1,"category":"NULL","file":"Content/Blueprints/Characters/BP_Player","function":"Event BeginPlay","snippet":"Get Pawn followed by direct call to Set Actor Location","lines":"N/A","risk":"Null reference crash","howToTrigger":"Called when Pawn not spawned","suggestedFix":"Add IsValid check after Get Pawn","confidence":"High","riskLevel":"P0"}
 ]
 ```
 

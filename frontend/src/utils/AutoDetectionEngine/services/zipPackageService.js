@@ -5,7 +5,6 @@
 
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-import { generateIntegratedReport } from './htmlReportTemplate.js';
 
 /**
  * ZIP Package Service Implementation
@@ -18,9 +17,9 @@ class ZipPackageServiceImpl {
   /**
    * Package all reports and statistics into a ZIP file
    * @param {Object} options - Package options
- * @param {Array<{groupName: string, xlsxBuffer: ArrayBuffer, defects: Array}>} options.defectReports - Defect reports
- * @param {string|ArrayBuffer} options.tokenStatistics - Token statistics (真 xlsx ArrayBuffer)
- * @param {string} [options.fileName] - Custom file name (without extension)
+   * @param {Array<{groupName: string, xlsxBuffer: ArrayBuffer, defects: Array}>} options.defectReports - Defect reports
+   * @param {string|ArrayBuffer} options.tokenStatistics - Token statistics (真 xlsx ArrayBuffer)
+   * @param {string} [options.fileName] - Custom file name (without extension)
    * @returns {Promise<void>}
    */
   async packageAndDownload(options) {
@@ -40,7 +39,7 @@ class ZipPackageServiceImpl {
       // 1. Add defect reports to defects/ folder
       if (defectReports.length > 0) {
         const defectsFolder = zip.folder('defects');
-        
+
         for (const report of defectReports) {
           if (report.xlsxBuffer) {
             // New path: xlsx binary
@@ -91,111 +90,6 @@ class ZipPackageServiceImpl {
       console.error('❌ Failed to package ZIP:', error);
       throw error;
     }
-  }
-
-  /**
-   * Generate HTML summary report
-   * @param {Object} options - Report options
-   * @param {Array} options.defectReports - Defect reports with defect details
-   * @param {Object} options.tokenStats - Token statistics
-   * @param {string} options.sessionId - Session ID
-   * @returns {string} - HTML content
-   */
-  generateHTMLSummary(options) {
-    const { defectReports = [], tokenStats = null, sessionId = '', projectType = 'cpp' } = options;
-
-    // Calculate totals
-    const totalFiles = defectReports.reduce((sum, r) => sum + (r.filesScanned || 0), 0);
-    const totalDefects = defectReports.reduce((sum, r) => sum + (r.defectsFound || 0), 0);
-    
-    // Calculate files with defects from defects array (or fallback to csvContent parsing)
-    let filesWithDefects = 0;
-    const fileSet = new Set(); // 用于去重，避免同一文件被计算多次
-    
-    defectReports.forEach(report => {
-      if (report.defects?.length) {
-        // New path: use structured defects array
-        report.defects.forEach(d => {
-          if (d._filePath) fileSet.add(d._filePath);
-        });
-      } else if (report.csvContent) {
-        // Legacy fallback: parse CSV
-        const lines = report.csvContent.split('\n');
-        // Skip header row
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-          
-          // Parse CSV line, File is the third column
-          const match = line.match(/^\d+,[^,]+,([^,]+),/);
-          if (match) {
-            const fileName = match[1];
-            fileSet.add(fileName);
-          }
-        }
-      }
-    });
-    
-    filesWithDefects = fileSet.size;
-    
-    // Calculate defect rate: (files with defects / total files) * 100
-    const defectRate = totalFiles > 0 ? ((filesWithDefects / totalFiles) * 100).toFixed(1) : 0;
-
-    // Calculate defect type counts
-    const defectTypeCounts = {};
-    
-    // Also calculate per-report defect types
-    defectReports.forEach(report => {
-      report.defectsByType = {}; // 初始化每个报告的缺陷类型统计
-
-      if (report.defects?.length) {
-        // New path: use structured defects array
-        report.defects.forEach(d => {
-          let category = d.type || '';
-          if (typeof category === 'object') category = category.zh || category.en || '';
-          category = String(category).toUpperCase();
-          if (!category) return;
-          defectTypeCounts[category] = (defectTypeCounts[category] || 0) + 1;
-          report.defectsByType[category] = (report.defectsByType[category] || 0) + 1;
-        });
-      } else if (report.csvContent) {
-        // Legacy fallback: parse CSV
-        const lines = report.csvContent.split('\n');
-        // Skip header row
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-          
-          // Parse CSV line, Category is the second column
-          const match = line.match(/^\d+,([A-Z]+),/);
-          if (match) {
-            const category = match[1];
-            // 全局统计
-            defectTypeCounts[category] = (defectTypeCounts[category] || 0) + 1;
-            // 每个报告的统计
-            report.defectsByType[category] = (report.defectsByType[category] || 0) + 1;
-          }
-        }
-      }
-    });
-
-    // Read the integrated report template
-    const html = this._generateIntegratedReport({
-      totalFiles,
-      totalDefects,
-      defectRate,
-      defectReports,
-      defectTypeCounts,
-      tokenStats,
-      sessionId,
-      projectType
-    });
-
-    return html;
-  }
-
-  _generateIntegratedReport(data) {
-    return generateIntegratedReport(data);
   }
 }
 
