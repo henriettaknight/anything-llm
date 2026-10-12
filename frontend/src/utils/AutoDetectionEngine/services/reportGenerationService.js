@@ -10,6 +10,7 @@ import { detectUserLanguage, needsTranslation } from '../utils/languageDetector.
 import { enhancedTranslate, containsChinese, validateTranslation } from './translationEnhancer.js';
 import { resolveReportGroups } from './reportDownloadResolver.js';
 import tokenStatisticsService from './tokenStatisticsService.js';
+import { normalizeRiskLevel } from '../utils/riskLevel.js';
 
 /**
  * @typedef {Object} DefectInfo
@@ -809,32 +810,16 @@ class ReportGenerationServiceImpl {
 
   /**
    * Generate an xlsx Blob directly from report data using SheetJS.
+   * 标签页结构（风险等级分页，见 doc/缺陷报告xlsx风险等级分页改造方案.md）：
+   *   ① 风险等级汇总 ② P0 阻断 ③ P1 严重 ④ P2 中等 ⑤ P3 轻微及以下
    * Returns { blob, fileName }.
    * @param {DetectionReport} report
    * @param {string} groupName
    * @returns {{ blob: Blob, fileName: string }}
    */
   generateXLSXReport(report, groupName) {
-    const rows = this._buildDefectRows(report);
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-
-    // Set column widths for readability
-    ws['!cols'] = [
-      { wch: 5 },   // No
-      { wch: 10 },  // Category
-      { wch: 35 },  // File
-      { wch: 30 },  // Function/Symbol
-      { wch: 50 },  // Snippet
-      { wch: 15 },  // Lines
-      { wch: 20 },  // Risk
-      { wch: 30 },  // HowToTrigger
-      { wch: 40 },  // SuggestedFix
-      { wch: 10 },  // Confidence
-    ];
-
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Defects');
+    this._appendRiskSheets(wb, report, 'zh');
 
     const wbBuf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([wbBuf], {
@@ -845,20 +830,23 @@ class ReportGenerationServiceImpl {
   }
 
   /**
-   * Build defect detail rows (aoa, with header) for xlsx export.
-   * Shared by generateXLSXReport (single Defects sheet) and generateUnitXLSX (multi-sheet).
+   * 按风险等级分桶构造缺陷明细行（每页 No 独立从 1 连续编号）。
+   * riskLevel 经 normalizeRiskLevel 归一化（大小写容错、P4→Info、非法值→空），
+   * P3 / Info / 未标注 全部归入 P3_INFO 兜底桶，不丢数据。
+   * Shared by generateXLSXReport and generateUnitXLSX (via _appendRiskSheets).
+   * @private
    * @param {DetectionReport} report
    * @param {string} [locale='zh']
-   * @returns {Array<Array>}
+   * @returns {{ headers: string[], buckets: Object<string, Array<Array>>, stats: Object }}
    */
-  _buildDefectRows(report, locale = 'zh') {
+  _buildDefectRowsByLevel(report, locale = 'zh') {
     const headers = [
       'No', 'Category', 'File', 'Function/Symbol',
       'Snippet', 'Lines', 'Risk', 'HowToTrigger', 'SuggestedFix', 'Confidence', 'RiskLevel'
     ];
 
-    const rows = [headers];
-    let defectIndex = 1;
+    const buckets = { P0: [], P1: [], P2: [], P3_INFO: [] };
+    const stats = { P0: 0, P1: 0, P2: 0, P3: 0, Info: 0, unlabeled: 0, total: 0 };
 
     const fileResults = this._resolveFileResults(report);
     for (const fileResult of fileResults) {
@@ -871,7 +859,7 @@ class ReportGenerationServiceImpl {
       // Fallback: if all defects were filtered out but raw defects exist, keep raw defects to avoid empty xlsx.
       const defectsForExport = validDefects.length > 0 ? validDefects : fileResult.defects;
       if (validDefects.length === 0 && fileResult.defects.length > 0) {
-        console.warn('[generateXLSXReport] All defects filtered as placeholders, fallback to raw defects', {
+        console.warn('[_buildDefectRowsByLevel] All defects filtered as placeholders, fallback to raw defects', {
           file: fileResult.file?.path,
           rawCount: fileResult.defects.length
         });
@@ -912,8 +900,11 @@ class ReportGenerationServiceImpl {
         const snippet = this._xlsxCell(defect.snippet || defect.code || '');
         const lines = this._xlsxCell(defect.lines || (defect.line > 0 ? `L${defect.line}` : ''));
 
-        rows.push([
-          defectIndex++,
+        const lv = normalizeRiskLevel(defect.riskLevel);
+        const bucket = (lv === 'P0' || lv === 'P1' || lv === 'P2') ? buckets[lv] : buckets.P3_INFO;
+
+        bucket.push([
+          bucket.length + 1, // No：每页独立连续编号
           this._xlsxCell(defectType),
           this._xlsxCell(fileResult.file.path),
           functionSymbol,
@@ -923,18 +914,103 @@ class ReportGenerationServiceImpl {
           this._xlsxCell(defectHowToTrigger),
           this._xlsxCell(defectRecommendation),
           confidence,
-          this._xlsxCell(defect.riskLevel || ''),
-          this._xlsxCell(defect.mechanismNote || '')
+          lv // RiskLevel：展示归一化结果，与所在页一致
         ]);
+
+        if (lv) stats[lv]++;
+        else stats.unlabeled++;
+        stats.total++;
       }
     }
 
+    return { headers, buckets, stats };
+  }
+
+  /**
+   * 构造“风险等级汇总”页 aoa：各等级数量、占比、合计。
+   * 存在未标注（riskLevel 空/非法）缺陷时额外单列一行，保证各行数量之和 = 总数。
+   * @private
+   * @param {Object} stats - _buildDefectRowsByLevel 返回的统计
+   * @param {string} [locale='zh']
+   * @returns {Array<Array>}
+   */
+  _buildRiskSummaryRows(stats, locale = 'zh') {
+    const total = stats.total;
+    const pct = n => (total > 0 ? ((n / total) * 100).toFixed(1) + '%' : '0%');
+    const zh = locale === 'zh';
+
+    const rows = [[
+      zh ? '风险等级' : 'Risk Level',
+      zh ? '数量' : 'Count',
+      zh ? '占比' : 'Ratio'
+    ]];
+
+    const levelRows = [
+      ['P0',   zh ? 'P0 阻断' : 'P0'],
+      ['P1',   zh ? 'P1 严重' : 'P1'],
+      ['P2',   zh ? 'P2 中等' : 'P2'],
+      ['P3',   zh ? 'P3 轻微' : 'P3'],
+      ['Info', zh ? 'Info 提示' : 'Info']
+    ];
+    for (const [key, label] of levelRows) {
+      rows.push([label, stats[key], pct(stats[key])]);
+    }
+    if (stats.unlabeled > 0) {
+      rows.push([zh ? '未标注' : 'Unlabeled', stats.unlabeled, pct(stats.unlabeled)]);
+    }
+    rows.push([zh ? '合计' : 'Total', total, '100%']);
     return rows;
   }
 
   /**
-   * Generate a single-module xlsx Blob containing three sheets:
-   * 缺陷明细 + Token统计-汇总 + Token统计-逐文件.
+   * 向工作簿追加风险等级分页 sheets：
+   *   ① 风险等级汇总 ② P0 阻断 ③ P1 严重 ④ P2 中等 ⑤ P3 轻微及以下
+   * 空桶也保留表头行，结构恒定 5 页。generateXLSXReport 与 generateUnitXLSX 共用。
+   * @private
+   * @param {Object} wb - XLSX 工作簿（XLSX.utils.book_new() 产物）
+   * @param {DetectionReport} report
+   * @param {string} [locale='zh']
+   */
+  _appendRiskSheets(wb, report, locale = 'zh') {
+    // 风险等级桶定义（顺序即标签页顺序）
+    const RISK_BUCKETS = [
+      { key: 'P0',      zh: 'P0 阻断',       en: 'P0' },
+      { key: 'P1',      zh: 'P1 严重',       en: 'P1' },
+      { key: 'P2',      zh: 'P2 中等',       en: 'P2' },
+      { key: 'P3_INFO', zh: 'P3 轻微及以下', en: 'P3-Info' }
+    ];
+    const DETAIL_COLS = [
+      { wch: 5 },   // No
+      { wch: 10 },  // Category
+      { wch: 35 },  // File
+      { wch: 30 },  // Function/Symbol
+      { wch: 50 },  // Snippet
+      { wch: 15 },  // Lines
+      { wch: 20 },  // Risk
+      { wch: 30 },  // HowToTrigger
+      { wch: 40 },  // SuggestedFix
+      { wch: 10 },  // Confidence
+      { wch: 10 }   // RiskLevel
+    ];
+
+    const { headers, buckets, stats } = this._buildDefectRowsByLevel(report, locale);
+
+    // Sheet 1: 风险等级汇总
+    const wsSummary = XLSX.utils.aoa_to_sheet(this._buildRiskSummaryRows(stats, locale));
+    wsSummary['!cols'] = [{ wch: 16 }, { wch: 8 }, { wch: 8 }];
+    XLSX.utils.book_append_sheet(wb, wsSummary, locale === 'zh' ? '风险等级汇总' : 'Risk Summary');
+
+    // Sheet 2-5: 各风险等级明细（空桶保留表头）
+    for (const bucket of RISK_BUCKETS) {
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...buckets[bucket.key]]);
+      ws['!cols'] = DETAIL_COLS;
+      XLSX.utils.book_append_sheet(wb, ws, locale === 'zh' ? bucket.zh : bucket.en);
+    }
+  }
+
+  /**
+   * Generate a single-module xlsx Blob containing risk-level sheets plus token sheets:
+   * 风险等级汇总 + P0 阻断 + P1 严重 + P2 中等 + P3 轻微及以下 + Token统计-汇总 + Token统计-逐文件.
    * Token sheets are filtered per-module via tokenStatisticsService.buildModuleTokenSheets.
    * @param {DetectionReport} unitReport - converted detection report for one module
    * @param {string} moduleName
@@ -944,14 +1020,8 @@ class ReportGenerationServiceImpl {
   async generateUnitXLSX(unitReport, moduleName, locale = 'zh') {
     const wb = XLSX.utils.book_new();
 
-    // Sheet 1: 缺陷明细（复用现有缺陷行构造）
-    const defectRows = this._buildDefectRows(unitReport, locale);
-    const wsDefect = XLSX.utils.aoa_to_sheet(defectRows);
-    wsDefect['!cols'] = [
-      { wch: 5 }, { wch: 10 }, { wch: 35 }, { wch: 30 }, { wch: 50 },
-      { wch: 15 }, { wch: 20 }, { wch: 30 }, { wch: 40 }, { wch: 10 },
-    ];
-    XLSX.utils.book_append_sheet(wb, wsDefect, locale === 'zh' ? '缺陷明细' : 'Defects');
+    // Sheet 1-5: 风险等级汇总 + 各等级缺陷明细（复用公共分页逻辑）
+    this._appendRiskSheets(wb, unitReport, locale);
 
     // Sheet 2/3: 该子模块 token 统计（汇总 + 逐文件），复用 tokenStatisticsService
     const { summaryRows, fileRows } = tokenStatisticsService.buildModuleTokenSheets(moduleName, locale);
