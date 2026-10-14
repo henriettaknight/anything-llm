@@ -15,6 +15,7 @@ const {
 } = require("./index");
 const { resolveThink } = require("../helpers/chat/think");
 const { isTranslationWorkspace } = require("../../utils/translation/constants");
+const { isFtsSpriteWorkspace } = require("../../utils/fts_sprite/constants");
 
 const VALID_CHAT_MODE = ["chat", "query"];
 
@@ -37,7 +38,10 @@ async function streamChatWithWorkspace(
   // 追加到 system prompt 尾部的动态检索增强段（例如翻译的术语表 + 翻译记忆）。
   // 这类内容按原文动态抽取，不能写死进 workspace.openAiPrompt，
   // 又不该污染 user message，因此挂在 system 侧。
-  systemAddendum = null
+  systemAddendum = null,
+  // 完全替换系统指令（不再使用 workspace.openAiPrompt）。
+  // FTS 精灵使用：精灵人格与回答规则由 Python 服务的提示词文件统一维护。
+  systemPromptOverride = null
 ) {
   const uuid = uuidv4();
   const updatedMessage = await grepCommand(message, user);
@@ -73,7 +77,11 @@ async function streamChatWithWorkspace(
   // 思考开关按场景解析：翻译默认关闭，其余默认开启。
   // 仅 Ollama provider 会消费该参数，其它 provider 忽略（无副作用）。
   const think = resolveThink(
-    isTranslationWorkspace(workspace) ? "translation" : "chat"
+    isTranslationWorkspace(workspace)
+      ? "translation"
+      : isFtsSpriteWorkspace(workspace)
+        ? "fts_sprite"
+        : "chat"
   );
 
   const VectorDb = getVectorDbClass();
@@ -254,7 +262,8 @@ async function streamChatWithWorkspace(
 
   // 系统指令 = workspace.openAiPrompt（+ 用户名等原生拼装）；
   // 翻译场景还会追加动态术语表 / 翻译记忆，让 user message 保持纯净原文。
-  const baseSystemPrompt = await chatPrompt(workspace, user);
+  const baseSystemPrompt =
+    systemPromptOverride ?? (await chatPrompt(workspace, user));
   const systemPrompt =
     systemAddendum && systemAddendum.trim()
       ? `${baseSystemPrompt}\n\n${systemAddendum.trim()}`
@@ -316,10 +325,11 @@ async function streamChatWithWorkspace(
   if (extraMetrics) metrics = { ...(metrics || {}), ...extraMetrics };
 
   // 代码检测（code_review）用量落库：仅在请求显式带 feature 标记时写 usage_logs
-  if (feature === "code_review" && metrics) {
+  // FTS 精灵（fts_sprite）主 LLM 用量同样记录，中间 LLM 用量由 /fts_sprite/internal/llm 记录
+  if ((feature === "code_review" || feature === "fts_sprite") && metrics) {
     await recordUsage({
       userId: user?.id || null,
-      feature: "code_review",
+      feature,
       provider: workspace?.chatProvider || null,
       model: workspace?.chatModel || null,
       metrics,

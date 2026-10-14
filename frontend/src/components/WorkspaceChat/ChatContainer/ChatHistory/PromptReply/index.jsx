@@ -3,6 +3,8 @@ import { Warning } from "@phosphor-icons/react";
 import UserIcon from "../../../../UserIcon";
 import renderMarkdown from "@/utils/chat/markdown";
 import Citations from "../Citation";
+import FtsSpriteStatusLine from "../fts_sprite/StatusLine";
+import FtsSpriteDebugPanel from "../fts_sprite/DebugPanel";
 import {
   THOUGHT_REGEX_CLOSE,
   THOUGHT_REGEX_COMPLETE,
@@ -18,6 +20,8 @@ const PromptReply = ({
   workspace,
   sources = [],
   closed = true,
+  ftsSpriteStatus = null,
+  ftsSpriteDebug = null,
 }) => {
   const assistantBackgroundColor = "bg-theme-bg-chat";
 
@@ -32,6 +36,7 @@ const PromptReply = ({
           <div className="flex gap-x-5">
             <WorkspaceProfileImage workspace={workspace} />
             <div className="mt-3 ml-5 dot-falling light:invert"></div>
+            <FtsSpriteStatusLine text={ftsSpriteStatus} />
           </div>
         </div>
       </div>
@@ -65,6 +70,7 @@ const PromptReply = ({
       className={`flex justify-center items-end w-full ${assistantBackgroundColor}`}
     >
       <div className="py-8 px-4 w-full flex gap-x-5 md:max-w-[80%] flex-col">
+        <FtsSpriteDebugPanel debug={ftsSpriteDebug} answer={reply} />
         <div className="flex gap-x-5">
           <WorkspaceProfileImage workspace={workspace} />
           <RenderAssistantChatContent

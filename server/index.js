@@ -32,6 +32,7 @@ const { mobileEndpoints } = require("./endpoints/mobile");
 const { directAiProxyEndpoints } = require("./endpoints/directAiProxy");
 const { usageLogsEndpoints } = require("./endpoints/usageLogs");
 const { translationEndpoints } = require("./endpoints/translation");
+const { ftsSpriteEndpoints } = require("./endpoints/fts_sprite");
 const { httpLogger } = require("./middleware/httpLogger");
 const app = express();
 const apiRouter = express.Router();
@@ -124,6 +125,7 @@ mobileEndpoints(apiRouter);
 directAiProxyEndpoints(apiRouter);
 usageLogsEndpoints(apiRouter);
 translationEndpoints(apiRouter);
+ftsSpriteEndpoints(apiRouter);
 
 // Externally facing embedder endpoints
 embeddedEndpoints(apiRouter);

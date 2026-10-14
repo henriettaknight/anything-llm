@@ -131,6 +131,13 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
 FROM build-${TARGETARCH} AS build
 RUN echo "Running common build flow of AnythingLLM image for all architectures"
 
+# FTS 精灵 Python 服务运行环境（python3 + venv）
+USER root
+# hadolint ignore=DL3008
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends python3 python3-venv && \
+    rm -rf /var/lib/apt/lists/*
+
 USER anythingllm
 WORKDIR /app
 
@@ -174,6 +181,12 @@ COPY --chown=anythingllm:anythingllm ./collector/ ./collector/
 WORKDIR /app/collector
 ENV PUPPETEER_DOWNLOAD_BASE_URL=https://storage.googleapis.com/chrome-for-testing-public
 RUN yarn install --production --network-timeout 100000 && yarn cache clean
+
+# Install FTS Sprite (Python) service
+COPY --chown=anythingllm:anythingllm ./fts_sprite/ ./fts_sprite/
+WORKDIR /app/fts_sprite
+RUN python3 -m venv .venv && \
+    .venv/bin/pip install --no-cache-dir -r requirements.txt
 
 WORKDIR /app
 USER anythingllm

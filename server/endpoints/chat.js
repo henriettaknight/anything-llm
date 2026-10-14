@@ -19,6 +19,8 @@ const truncate = require("truncate");
 const { getModelTag } = require("./utils");
 const { isTranslationWorkspace } = require("../utils/translation/constants");
 const { enhanceTranslationPrompt } = require("../utils/translation/enhancePrompt");
+const { isFtsSpriteWorkspace } = require("../utils/fts_sprite/constants");
+const { streamFtsSpriteChat } = require("../utils/fts_sprite/chatHandler");
 
 function chatEndpoints(app) {
   if (!app) return;
@@ -67,7 +69,8 @@ function chatEndpoints(app) {
         // 从而自动适配 provider（ollama/openai/...）、享受统一思考开关与用量统计。
         // 传入 workspace/user：原文可能以附件形式上传，需要把附件正文
         // 一并纳入术语抽取与翻译记忆检索（否则附件场景命中数恒为 0）。
-        const translation = isTranslationWorkspace(workspace)
+        const isFtsSprite = isFtsSpriteWorkspace(workspace);
+        const translation = !isFtsSprite && isTranslationWorkspace(workspace)
           ? await enhanceTranslationPrompt(message, glossaryIds, {
               workspace,
               thread: null,
@@ -75,21 +78,33 @@ function chatEndpoints(app) {
             })
           : null;
 
-        await streamChatWithWorkspace(
-          response,
-          workspace,
-          translation?.prompt ?? message,
-          workspace?.chatMode,
-          user,
-          null,
-          attachments,
-          feature,
-          translation ? { translationMeta: translation.translationMeta } : null,
-          // 落库用原文：存到数据库的 workspace_chats.prompt 必须是用户原始提问。
-          translation ? message : null,
-          // 术语表 / 翻译记忆挂到 system 侧，不进 user message。
-          translation?.systemAddendum ?? null
-        );
+        // FTS 精灵 workspace：Python 工作流 + 原生主 LLM 流式回答（见 utils/fts_sprite）
+        if (isFtsSprite) {
+          await streamFtsSpriteChat({
+            response,
+            workspace,
+            message,
+            user,
+            thread: null,
+            attachments,
+          });
+        } else {
+          await streamChatWithWorkspace(
+            response,
+            workspace,
+            translation?.prompt ?? message,
+            workspace?.chatMode,
+            user,
+            null,
+            attachments,
+            feature,
+            translation ? { translationMeta: translation.translationMeta } : null,
+            // 落库用原文：存到数据库的 workspace_chats.prompt 必须是用户原始提问。
+            translation ? message : null,
+            // 术语表 / 翻译记忆挂到 system 侧，不进 user message。
+            translation?.systemAddendum ?? null
+          );
+        }
         await Telemetry.sendTelemetry("sent_chat", {
           multiUserMode: multiUserMode(response),
           LLMSelection: process.env.LLM_PROVIDER || "openai",
@@ -172,7 +187,8 @@ function chatEndpoints(app) {
         // thread 自动改名由下方原生逻辑统一处理（原本的 adapter 分支是重复实现）。
         // 传入 workspace/thread/user：原文可能以附件形式上传，需要把附件正文
         // 一并纳入术语抽取与翻译记忆检索（否则附件场景命中数恒为 0）。
-        const translation = isTranslationWorkspace(workspace)
+        const isFtsSprite = isFtsSpriteWorkspace(workspace);
+        const translation = !isFtsSprite && isTranslationWorkspace(workspace)
           ? await enhanceTranslationPrompt(message, glossaryIds, {
               workspace,
               thread,
@@ -180,21 +196,33 @@ function chatEndpoints(app) {
             })
           : null;
 
-        await streamChatWithWorkspace(
-          response,
-          workspace,
-          translation?.prompt ?? message,
-          workspace?.chatMode,
-          user,
-          thread,
-          attachments,
-          feature,
-          translation ? { translationMeta: translation.translationMeta } : null,
-          // 落库用原文：存到数据库的 workspace_chats.prompt 必须是用户原始提问。
-          translation ? message : null,
-          // 术语表 / 翻译记忆挂到 system 侧，不进 user message。
-          translation?.systemAddendum ?? null
-        );
+        // FTS 精灵 workspace：Python 工作流 + 原生主 LLM 流式回答（见 utils/fts_sprite）
+        if (isFtsSprite) {
+          await streamFtsSpriteChat({
+            response,
+            workspace,
+            message,
+            user,
+            thread,
+            attachments,
+          });
+        } else {
+          await streamChatWithWorkspace(
+            response,
+            workspace,
+            translation?.prompt ?? message,
+            workspace?.chatMode,
+            user,
+            thread,
+            attachments,
+            feature,
+            translation ? { translationMeta: translation.translationMeta } : null,
+            // 落库用原文：存到数据库的 workspace_chats.prompt 必须是用户原始提问。
+            translation ? message : null,
+            // 术语表 / 翻译记忆挂到 system 侧，不进 user message。
+            translation?.systemAddendum ?? null
+          );
+        }
 
         // If thread was renamed emit event to frontend via special `action` response.
         await WorkspaceThread.autoRenameThread({

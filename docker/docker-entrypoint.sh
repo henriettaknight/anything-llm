@@ -25,5 +25,16 @@ fi
     node /app/server/index.js
 } &
 { node /app/collector/index.js; } &
+# FTS 精灵 Python 服务：只监听容器内 127.0.0.1；异常退出后自动重启，
+# 避免 wait -n 因为它退出而导致整个容器退出。
+{
+  cd /app/fts_sprite &&
+    while true; do
+      /app/fts_sprite/.venv/bin/python -m uvicorn main:app \
+        --host 127.0.0.1 --port "${FTS_SPRITE_PORT:-8890}" --log-level warning
+      echo "[fts_sprite] service exited with code $?, restarting in 2s..."
+      sleep 2
+    done
+} &
 wait -n
 exit $?

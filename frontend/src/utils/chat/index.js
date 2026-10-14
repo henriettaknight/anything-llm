@@ -2,6 +2,15 @@ import { THREAD_RENAME_EVENT } from "@/components/Sidebar/ActiveWorkspaces/Threa
 import { emitAssistantMessageCompleteEvent } from "@/components/contexts/TTSProvider";
 export const ABORT_STREAM_EVENT = "abort-chat-stream";
 
+// FTS 精灵：工作流调试信息先于回答到达，暂存在这里，
+// 等回答消息创建时挂到该消息上（只在页面内存中，不落库）。
+let ftsSpritePendingDebug = null;
+function consumeFtsSpriteDebug() {
+  const debug = ftsSpritePendingDebug;
+  ftsSpritePendingDebug = null;
+  return debug ? { ftsSpriteDebug: debug } : {};
+}
+
 // For handling of chat responses in the frontend by their various types.
 export default function handleChat(
   chatResult,
@@ -24,7 +33,30 @@ export default function handleChat(
     metrics = {},
   } = chatResult;
 
+  // FTS 精灵：工作流进度。只更新等待中的占位消息，不结束 loading，
+  // 也不写入 _chatHistory（第一段正文到达时占位消息会被替换掉）。
+  // 注意：占位消息不能带 userMessage，否则 ChatContainer 会把它当作新提问再次发送。
+  if (type === "ftsSpriteStatus") {
+    setChatHistory([
+      ..._chatHistory,
+      {
+        uuid,
+        content: "",
+        role: "assistant",
+        pending: true,
+        animate: true,
+        ftsSpriteStatus: textResponse,
+      },
+    ]);
+    return;
+  }
+  if (type === "ftsSpriteDebug") {
+    ftsSpritePendingDebug = chatResult.debug || null;
+    return;
+  }
+
   if (type === "abort" || type === "statusResponse") {
+    ftsSpritePendingDebug = null;
     setLoadingResponse(false);
     setChatHistory([
       ...remHistory,
@@ -54,6 +86,7 @@ export default function handleChat(
       metrics,
     });
   } else if (type === "textResponse") {
+    const ftsSpriteExtra = consumeFtsSpriteDebug();
     setLoadingResponse(false);
     setChatHistory([
       ...remHistory,
@@ -68,6 +101,7 @@ export default function handleChat(
         pending: false,
         chatId,
         metrics,
+        ...ftsSpriteExtra,
       },
     ]);
     _chatHistory.push({
@@ -81,6 +115,7 @@ export default function handleChat(
       pending: false,
       chatId,
       metrics,
+      ...ftsSpriteExtra,
     });
     emitAssistantMessageCompleteEvent(chatId);
   } else if (
@@ -134,12 +169,14 @@ export default function handleChat(
         pending: false,
         chatId,
         metrics,
+        ...consumeFtsSpriteDebug(),
       });
     }
     setChatHistory([..._chatHistory]);
   } else if (type === "agentInitWebsocketConnection") {
     setWebsocket(chatResult.websocketUUID);
   } else if (type === "stopGeneration") {
+    ftsSpritePendingDebug = null;
     const chatIdx = _chatHistory.length - 1;
     const existingHistory = { ..._chatHistory[chatIdx] };
     const updatedHistory = {

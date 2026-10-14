@@ -19,11 +19,13 @@
 //   OLLAMA_THINK_TRANSLATION  翻译，默认 false（短任务，思考 token 远超译文本身）
 //   OLLAMA_THINK_CODEREVIEW   代码检测，默认 true（思维链有助于推理缺陷，
 //                             改动前需先用 gui.h 等样本做 A/B 验证召回率）
+//   OLLAMA_THINK_FTS_SPRITE  FTS 精灵，默认 false（意图识别输出纯 JSON，回答依赖已算好的上下文）
 
 /** 场景 → 专项环境变量名 */
 const THINK_ENV_BY_SCENE = {
   translation: "OLLAMA_THINK_TRANSLATION",
   codereview: "OLLAMA_THINK_CODEREVIEW",
+  fts_sprite: "OLLAMA_THINK_FTS_SPRITE",
 };
 
 /**
@@ -34,6 +36,8 @@ const THINK_ENV_BY_SCENE = {
 const SCENE_DEFAULTS = {
   translation: false,
   codereview: true,
+  // FTS 精灵：意图识别要求纯 JSON，回答依赖预先算好的上下文，默认关闭思考以降低延迟
+  fts_sprite: false,
   chat: true,
 };
 
@@ -54,7 +58,7 @@ function toBool(value, fallback) {
 /**
  * 解析当前场景是否开启思考。
  * 优先级：场景专项 env > 场景内置默认 > 全局 OLLAMA_THINK 兜底。
- * @param {"chat"|"translation"|"codereview"} [scene="chat"] - 调用场景
+ * @param {"chat"|"translation"|"codereview"|"fts_sprite"} [scene="chat"] - 调用场景
  * @returns {boolean}
  */
 function resolveThink(scene = "chat") {

@@ -23,6 +23,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { chatQueryRefusalResponse } from "@/utils/chat";
 import CollapsibleText from "../CollapsibleText";
+import FtsSpriteDebugPanel from "../fts_sprite/DebugPanel";
 import { isTranslationWorkspace } from "@/utils/translation/constants";
 
 const HistoricalMessage = ({
@@ -41,6 +42,7 @@ const HistoricalMessage = ({
   forkThread,
   metrics = {},
   alignmentCls = "",
+  ftsSpriteDebug = null,
 }) => {
   const { t } = useTranslation();
   const { isEditing } = useEditMessage({ chatId, role });
@@ -92,6 +94,9 @@ const HistoricalMessage = ({
       } flex justify-center items-end w-full group bg-theme-bg-chat`}
     >
       <div className="py-8 px-4 w-full flex gap-x-5 md:max-w-[80%] flex-col">
+        {role === "assistant" && (
+          <FtsSpriteDebugPanel debug={ftsSpriteDebug} answer={message} />
+        )}
         <div className={`flex gap-x-5 ${alignmentCls}`}>
           <div className="flex flex-col items-center">
             <ProfileImage role={role} workspace={workspace} />
@@ -202,7 +207,8 @@ export default memo(
       prevProps.message === nextProps.message &&
       prevProps.isLastMessage === nextProps.isLastMessage &&
       prevProps.chatId === nextProps.chatId &&
-      prevProps.metrics === nextProps.metrics
+      prevProps.metrics === nextProps.metrics &&
+      prevProps.ftsSpriteDebug === nextProps.ftsSpriteDebug
     );
   }
 );

@@ -352,6 +352,8 @@ function buildMessages({
           error={props.error}
           workspace={workspace}
           closed={props.closed}
+          ftsSpriteStatus={props.ftsSpriteStatus}
+          ftsSpriteDebug={props.ftsSpriteDebug}
         />
       );
     } else {
@@ -372,6 +374,7 @@ function buildMessages({
           forkThread={forkThread}
           metrics={props.metrics}
           alignmentCls={getMessageAlignment?.(props.role)}
+          ftsSpriteDebug={props.ftsSpriteDebug}
         />
       );
     }

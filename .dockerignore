@@ -9,6 +9,8 @@
 **/dist/
 **/v-env/
 **/__pycache__/
+**/fts_sprite/.venv/
+**/.pytest_cache/
 **/.env
 **/.env.*
 **/bundleinspector.html
