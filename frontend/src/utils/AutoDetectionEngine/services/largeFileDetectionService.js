@@ -20,12 +20,14 @@ import { buildChunkSystemPrompt, buildChunkUserMessage } from '../context/chunkC
 import { buildFileStructureSkeleton, locateScopeForChunk } from '../context/headerSkeletonExtractor.js';
 import tokenStatisticsService from './tokenStatisticsService.js';
 
-/** 单文件进入分块送审的规模阈值（行/token）。
- *  700 行对 C++ 过大：实测单块 prompt 达 ~14.5K token，临界/超过 16K 窗口被截断，
- *  导致模型对该块只输出粗略 category、漏填 snippet/lines/risk 等字段。降为 400 行使单块 < 窗口 70~80%。 */
-export const SINGLE_FILE_CHUNK_THRESHOLD = 400;
+/** 单文件进入分块送审的规模阈值（行）。
+ *  历史：700→400 仍过大；实测 400 行单块 prompt ≈ 15.5K~16.3K token，逼近 num_ctx(16384) 的 99%，
+ *  导致模型把任务指令挤出窗口、返回"代码像骨架/混淆版无可分析逻辑"的拒答（0 缺陷）。
+ *  降为 250 行使单块 user 体 ≤ ~5.5K token、整体 ≤ 窗口 75%，留足系统提示词(~6.5K)与输出预算。
+ *  ⚠️ cpp_prompt.md 后续再扩充必须按 prompt_tokens 实测复核，勿凭行数估算。 */
+export const SINGLE_FILE_CHUNK_THRESHOLD = 250;
 /** 相邻分块之间的重叠行数（重叠区仅识别不重复报，过大将显著拖慢本地模型） */
-export const CHUNK_OVERLAP = 150;
+export const CHUNK_OVERLAP = 100;
 /** 单块内容字符上限兜底（避免极端长行导致单块token爆炸） */
 export const MAX_CHUNK_CHARS = 120000;
 /**

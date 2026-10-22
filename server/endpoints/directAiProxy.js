@@ -16,11 +16,17 @@ const { userFromSession } = require("../utils/http");
 const { recordUsage } = require("../utils/usageLogs");
 const { resolveThink } = require("../utils/helpers/chat/think");
 
-const PROXY_TIMEOUT = 10 * 60 * 1000;
+// 空闲看门狗超时（memory 17761769 / issue 63156562）：
+// - IDLE_TIMEOUT：超过该时长“没有任何数据流动”才掐断（流式 token / keepalive 计为活动），
+//   覆盖 GPU 争抢导致的慢块（单块推理偶发 >10min 不应被误杀）。
+// - TOTAL_TIMEOUT：绝对上限兜底，防止极端情况下请求永久挂起。
+// 注意：应用层用 AbortController 做空闲判定（见下方 POST handler），undici Agent 自身不独立掐断。
+const IDLE_TIMEOUT = 10 * 60 * 1000;   // 10 分钟无数据
+const TOTAL_TIMEOUT = 45 * 60 * 1000;  // 45 分钟总量兜底
 const proxyAgent = new Agent({
-  headersTimeout: PROXY_TIMEOUT,
-  bodyTimeout: PROXY_TIMEOUT,
   connectTimeout: 30_000,
+  headersTimeout: TOTAL_TIMEOUT,
+  bodyTimeout: TOTAL_TIMEOUT,
 });
 
 let _cachedOllamaAddr = null;
@@ -217,11 +223,27 @@ function directAiProxyEndpoints(app) {
           proxyHeaders['Authorization'] = `Bearer ${resolvedApiKey}`;
         }
 
+        // 空闲看门狗：仅当超过 IDLE_TIMEOUT 没有任何数据流动才 abort；
+        // 每条流式 chunk 都会调用 _resetIdle() 重置空闲计时器。TOTAL_TIMEOUT 作绝对上限。
+        const proxyAbort = new AbortController();
+        const _hardTimer = setTimeout(() => {
+          proxyAbort.abort(new Error('Direct AI request exceeded total timeout (45m)'));
+        }, TOTAL_TIMEOUT);
+        let _idleTimer = setTimeout(() => {
+          proxyAbort.abort(new Error('Direct AI request idle timeout (no data for 10m)'));
+        }, IDLE_TIMEOUT);
+        const _resetIdle = () => {
+          clearTimeout(_idleTimer);
+          _idleTimer = setTimeout(() => {
+            proxyAbort.abort(new Error('Direct AI request idle timeout (no data for 10m)'));
+          }, IDLE_TIMEOUT);
+        };
+
         const backendResponse = await fetch(targetUrl, {
           method: 'POST',
           headers: proxyHeaders,
           body: JSON.stringify(transformedBody),
-          signal: AbortSignal.timeout(PROXY_TIMEOUT),
+          signal: proxyAbort.signal,
           dispatcher: proxyAgent,
         });
 
@@ -290,6 +312,7 @@ function directAiProxyEndpoints(app) {
             if (done) break;
             const chunk = decoder.decode(value, { stream: true });
             response.write(chunk);
+            _resetIdle();   // 收到任意数据即视为活动，重置空闲计时器
 
             // 按行解析，未完成的行留在 lineBuffer 等待下次拼接
             lineBuffer += chunk;
@@ -304,6 +327,8 @@ function directAiProxyEndpoints(app) {
           flushUsageLine(lineBuffer);
           lineBuffer = "";
         } finally {
+          clearTimeout(_hardTimer);
+          clearTimeout(_idleTimer);
           reader.releaseLock();
           response.end();
         }

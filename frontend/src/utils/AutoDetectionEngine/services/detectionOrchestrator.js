@@ -342,9 +342,10 @@ class DetectionOrchestratorImpl {
         .replace('T', '_')
         .substring(0, 19);
 
-      // 旧行为（streamPerUnit=false）：收集各分组报告并整包 ZIP 下载
-      if (!streamPerUnit) {
-        console.log('📦 Collecting all reports for ZIP packaging...');
+      // 收集各分组报告并整包 ZIP 自动下载（不再仅限 streamPerUnit=false）。
+      // 流式模式下同样在检测完成时自动下载整包 ZIP；运行文件夹的逐组文件照常写入，
+      // 报告区（localStorage）照常保存，用户仍可随时去报告区手动下载。
+      console.log('📦 Collecting all reports for ZIP packaging...');
       const defectReports = [];
       
       for (const result of allResults) {
@@ -409,7 +410,6 @@ class DetectionOrchestratorImpl {
       });
       
       console.log('✅ ZIP package generated and downloaded successfully');
-      }
       
       // 🔧 调用 onReportGenerated 回调，保存报告到 localStorage（报告区）
       if (onReportGenerated) {

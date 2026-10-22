@@ -86,19 +86,38 @@ export class DirectAIAdapter {
   }
 
   /**
-   * Create an AbortController with timeout and optional external signal.
+   * Create an AbortController with idle-watchdog + total-cap timeout.
+   * 空闲看门狗（memory 17761769）：超过 IDLE 超时“没有任何数据流动”才 abort（流式 token 计为活动）；
+   * TOTAL 超时作绝对上限兜底，防止请求永久挂起。
+   * 返回的 resetIdle() 必须在每次收到数据（流式 chunk）时调用以重置空闲计时。
    * @private
    * @param {Object} options - Options containing optional signal
-   * @param {number} [timeoutMs=600000] - Timeout in milliseconds
-   * @returns {AbortController}
+   * @param {number} [idleMs=600000] - 空闲超时（默认 10 分钟）
+   * @param {number} [totalMs=2700000] - 总量兜底（默认 45 分钟）
+   * @returns {{controller: AbortController, resetIdle: Function, clear: Function}}
    */
-  _createAbortController(options, timeoutMs = 600000) {
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  _createAbortController(options, idleMs = 10 * 60 * 1000, totalMs = 45 * 60 * 1000) {
     const controller = new AbortController();
     if (options.signal) {
       options.signal.addEventListener('abort', () => controller.abort());
     }
-    timeoutSignal.addEventListener('abort', () => controller.abort());
+    const _hardTimer = setTimeout(() => {
+      controller.abort(new Error(`Direct AI request exceeded total timeout (${totalMs}ms)`));
+    }, totalMs);
+    let _idleTimer = setTimeout(() => {
+      controller.abort(new Error(`Direct AI request idle timeout (no data for ${idleMs}ms)`));
+    }, idleMs);
+    // 把看门狗控制方法挂在 controller 上，读取循环直接调用，调用点无需改签名
+    controller.resetIdle = () => {
+      clearTimeout(_idleTimer);
+      _idleTimer = setTimeout(() => {
+        controller.abort(new Error(`Direct AI request idle timeout (no data for ${idleMs}ms)`));
+      }, idleMs);
+    };
+    controller.clear = () => {
+      clearTimeout(_hardTimer);
+      clearTimeout(_idleTimer);
+    };
     return controller;
   }
 
@@ -217,7 +236,7 @@ export class DirectAIAdapter {
       // Streaming path: collect full response from SSE stream (keeps nginx alive)
       if (useStreaming) {
         console.log('\n✅ Response OK, collecting streaming response...');
-        const { fullContent, tokenUsage, chunkCount } = await this._collectStreamResponse(response);
+        const { fullContent, tokenUsage, chunkCount } = await this._collectStreamResponse(response, controller);
 
         console.log('\n✅ Streaming response collected:');
         console.log('  - Total chunks:', chunkCount);
@@ -272,7 +291,7 @@ export class DirectAIAdapter {
    * @param {Response} response - Fetch response with readable stream
    * @returns {Promise<{fullContent: string, tokenUsage: Object|null, chunkCount: number}>}
    */
-  async _collectStreamResponse(response) {
+  async _collectStreamResponse(response, controller) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -284,6 +303,7 @@ export class DirectAIAdapter {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (controller?.resetIdle) controller.resetIdle();   // 收到任意数据即视为活动
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -313,6 +333,7 @@ export class DirectAIAdapter {
       }
     } finally {
       reader.releaseLock();
+      if (controller?.clear) controller.clear();
     }
 
     return { fullContent, tokenUsage, chunkCount };
@@ -421,6 +442,7 @@ export class DirectAIAdapter {
             break;
           }
 
+          controller.resetIdle();   // 收到任意 chunk 即视为活动，重置空闲计时器
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
@@ -483,6 +505,7 @@ export class DirectAIAdapter {
         }
       } finally {
         reader.releaseLock();
+        if (controller?.clear) controller.clear();
         console.log('🔓 Reader lock released');
       }
     } catch (error) {
