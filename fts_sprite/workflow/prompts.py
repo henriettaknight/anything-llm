@@ -26,12 +26,34 @@ def render(name: str, **values: str) -> str:
     return text
 
 
-def intent_messages(query: str, missions: str, planets: str, history: list[dict]) -> list[dict]:
-    """Intent Resolver（画布 Agent:LuckyMailsLike）：system + 历史 + 本轮 user。"""
+def intent_messages(
+    query: str,
+    missions: str,
+    planets: str,
+    history: list[dict],
+    player_context: str = "{}",
+    creatures: str = "[]",
+) -> list[dict]:
+    """
+    Intent Resolver（画布 Agent:LuckyMailsLike）：system + 历史 + 本轮 user。
+
+    相比画布额外提供 player_context（当前星球 / 当前任务）和 creatures（生物列表），
+    用于解析“这个动物”“这里”等指代。
+    """
     return [
         {"role": "system", "content": load("intent_system")},
         *history,
-        {"role": "user", "content": render("intent_user", query=query, missions=missions, planets=planets)},
+        {
+            "role": "user",
+            "content": render(
+                "intent_user",
+                query=query,
+                missions=missions,
+                planets=planets,
+                player_context=player_context,
+                creatures=creatures,
+            ),
+        },
     ]
 
 

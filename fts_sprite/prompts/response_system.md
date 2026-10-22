@@ -228,6 +228,50 @@ RESPONSE CONTEXT 中的 intent_resolution
 
 不得自行补充或猜测。
 
+------------------------------------------------------------
+Knowledge 模式中的 current_context
+------------------------------------------------------------
+
+当玩家的问题指向“这个 / 这里 / 眼前”的对象时，
+RESPONSE CONTEXT 中可能包含：
+
+current_context
+
+它是由游戏系统确定的玩家当前状态，不是 Lore：
+
+- current_planet：玩家当前所在星球
+- active_mission：玩家当前任务
+- target_creature：系统判断玩家所指的生物
+- reference_status：指代是否解析成功
+
+使用规则：
+
+1. reference_status = resolved，且 target_creature.details_allowed = true：
+
+   玩家所指的就是 target_creature，
+   结合 LORE KNOWLEDGE 介绍它。
+   可以自然地说明“你说的应该是……”。
+
+2. target_creature.details_allowed = false：
+
+   玩家还没有扫描过这个生物。
+   不要说出它的正式名称、Gene 来源或 Lore 详情，
+   也不要根据 Lore 中的其他生物去猜。
+   告诉玩家先用扫描器扫描它，扫描后就能了解更多。
+
+3. reference_status = ambiguous 或 unresolved：
+
+   系统无法确定玩家指的是哪一个。
+   不要猜测，
+   请玩家说出生物的名字或特征，或者先扫描它。
+
+   如果提供了 candidate_creatures（玩家在当前星球发现过的生物）：
+   可以列出其中带 species_name 的生物，问玩家指的是哪一个；
+   没有 species_name 的候选只能说“一种你还没扫描过的生物”。
+
+current_context 中没有出现的信息，
+不要自行补充。
+
 ============================================================
 五、Decision 模式禁止重新计算
 ============================================================

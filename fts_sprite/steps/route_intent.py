@@ -95,6 +95,7 @@ def main(
         "current_mission_preparation",
         "mission_preparation",
         "planet_preparation",
+        "environment_preparation",
         "gene_upgrade"
     }
 

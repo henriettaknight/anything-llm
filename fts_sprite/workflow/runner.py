@@ -12,8 +12,10 @@ FTS 精灵工作流编排（对应 RAGFlow 画布「FTS游戏精灵0.5」）。
 
 本实现的并行点：
   1. 7 个 Mock Server 请求在开始时一次性并发发出；意图识别只等待它需要的
-     missions / planets，其余请求与意图识别 LLM 并行进行。
-  2. knowledge 路径不需要游戏数据，确定路由后立即取消剩余请求。
+     missions / planets / player / creatures，其余请求与意图识别 LLM 并行进行。
+  2. knowledge 路径一般不需要游戏数据，确定路由后立即取消剩余请求；
+     问题指向当前对象（use_current_context）或询问生物时，保留玩家状态和
+     发现程度请求，用于解析指代和过滤未发现生物的 Lore（steps/current_context.py）。
   3. 每个 lore_key 的 RAGFlow 检索并发执行，结果按原优先级顺序合并，
      与画布 Iteration 逐条合并的结果一致。
 
@@ -39,6 +41,7 @@ from steps import (
     build_decision_context,
     build_lore_queries,
     build_response_context,
+    current_context,
     knowledge_lore_router,
     knowledge_scope_filter,
     merge_lore_result,
@@ -163,13 +166,22 @@ async def run_workflow(req: RunRequest, deps: Deps, emit: Emit) -> dict:
 
     try:
         # --------------------------------------------------------
-        # 2. 意图识别（Intent Resolver，只依赖 missions / planets）
+        # 2. 意图识别（Intent Resolver，依赖 missions / planets / player / creatures）
         # --------------------------------------------------------
         await status("intent")
-        missions_raw, planets_raw = await asyncio.gather(game_tasks["missions"], game_tasks["planets"])
+        missions_raw, planets_raw, player_raw, creatures_raw = await asyncio.gather(
+            game_tasks["missions"], game_tasks["planets"], game_tasks["player"], game_tasks["creatures"]
+        )
+        player_context_json, creatures_json = await _run_code(
+            deps, trace, "intent_snapshot", current_context.intent_snapshot,
+            player_raw, missions_raw, planets_raw, creatures_raw, default=("{}", "[]"),
+        )
 
         history = req.history[-s.intent_history_messages:] if s.intent_history_messages > 0 else []
-        messages = prompts.intent_messages(req.message, missions_raw, planets_raw, history)
+        messages = prompts.intent_messages(
+            req.message, missions_raw, planets_raw, history,
+            player_context=player_context_json, creatures=creatures_json,
+        )
         try:
             with trace.timer("intent_llm"):
                 intent_json = await deps.llm.chat(
@@ -198,6 +210,7 @@ async def run_workflow(req: RunRequest, deps: Deps, emit: Emit) -> dict:
 
         decision_context_json = ""
         knowledge_context_json = ""
+        current_ctx: dict | None = None
 
         # --------------------------------------------------------
         # 3b. decision 路径
@@ -225,11 +238,29 @@ async def run_workflow(req: RunRequest, deps: Deps, emit: Emit) -> dict:
         # 3c. knowledge 路径
         # --------------------------------------------------------
         else:
-            _cancel(game_tasks)
             await status("knowledge")
+            if current_context.needs_game_context(intent_json):
+                # 只保留解析指代 / 发现程度需要的数据
+                _cancel({k: t for k, t in game_tasks.items() if k in ("genes", "equipment")})
+                discoveries_raw = await game_tasks["discoveries"]
+                intent_json, current_ctx = await _run_code(
+                    deps, trace, "resolve_current_context", current_context.resolve_knowledge_context,
+                    intent_json, player_raw, missions_raw, planets_raw, creatures_raw,
+                    discoveries_raw, s.player_id, default=(intent_json, None),
+                )
+                trace.put("intent_resolved", _try_json(intent_json))
+                trace.put("current_context", current_ctx)
+            else:
+                _cancel(game_tasks)
+
             knowledge_context_json = await _run_code(
                 deps, trace, "knowledge_lore_router", knowledge_lore_router.main, intent_json
             )
+            if current_ctx is not None:
+                knowledge_context_json = await _run_code(
+                    deps, trace, "filter_lore_by_discovery", current_context.filter_lore_requests,
+                    knowledge_context_json, current_ctx, default=knowledge_context_json,
+                )
             trace.put("knowledge_context", _try_json(knowledge_context_json))
 
         # --------------------------------------------------------
@@ -268,6 +299,7 @@ async def run_workflow(req: RunRequest, deps: Deps, emit: Emit) -> dict:
             deps, trace, "build_response_context", build_response_context.main,
             intent_json, decision_context_json, knowledge_context_json,
         )
+        response_context = current_context.attach_current_context(response_context, current_ctx)
         trace.put("response_context", _try_json(response_context))
 
         await status("answer")

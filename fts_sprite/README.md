@@ -11,10 +11,10 @@
                 ▼
         fts_sprite（本服务）
           1. 并发请求 Mock Game Server 的 7 个接口
-          2. 意图识别 LLM（只等待 missions / planets）
+          2. 意图识别 LLM（等待 missions / planets / player / creatures）
           3. 路由
              decision : 决策上下文 → 发现程度过滤 → 方案筛选
-             knowledge: Lore 路由（取消剩余的游戏数据请求）
+             knowledge: Lore 路由（指代当前对象或询问生物时，解析指代并按发现程度过滤）
              unknown  : 固定回复
           4. 每个 lore_key 并发检索 RAGFlow，按优先级合并
           5. 组装 RESPONSE CONTEXT，返回主 LLM 的 system / user 提示词
@@ -35,6 +35,7 @@
 | `workflow/runner.py` | 编排：顺序执行 + 并行点 |
 | `workflow/prompts.py` | 加载、渲染 `prompts/*.md` |
 | `steps/*.py` | 画布 Code 节点的**逐字迁移**，每个文件一个 `main()` |
+| `steps/current_context.py` | 服务新增（非画布节点）：解析“这个动物”等指代、knowledge 路径按发现程度过滤生物 Lore |
 | `clients/` | LLM（网关 / 直连）、RAGFlow、Mock Game Server 客户端 |
 | `prompts/` | 意图识别和主 LLM 的提示词，以及 unknown 时的固定回复 |
 | `tests/` | 用模拟服务跑通三条路径，并对比画布的串行结果 |

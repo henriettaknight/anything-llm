@@ -28,6 +28,7 @@ from clients.ragflow import RagflowClient  # noqa: E402
 from settings import settings as base_settings  # noqa: E402
 from steps import (  # noqa: E402
     build_decision_context,
+    current_context,
     build_lore_queries,
     build_response_context,
     knowledge_lore_router,
@@ -92,6 +93,7 @@ EQUIPMENT = [
      "effect_bonus": 15, "energy_cost": 10, "stock": 1, "rarity": "common"},
 ]
 CREATURES = [
+    {"creature_id": "CR001", "species_name": "熔岩甲虫", "lore_key": "creature_lava_beetle"},
     {"creature_id": "CR002", "species_name": "赤甲龙蜥", "lore_key": "creature_redscale_drake"},
     {"creature_id": "CR003", "species_name": "焰核巨兽", "lore_key": "creature_core_behemoth"},
 ]
@@ -122,6 +124,20 @@ INTENTS = {
         "target_mission_id": None, "target_planet_id": None, "target_creature_id": None,
         "target_effect_type": None, "requested_stat": None, "use_active_mission": False,
         "confidence": 0.95, "warnings": [],
+    },
+    # 指代当前对象：意图识别不猜 ID，交给 current_context 解析
+    "这个动物是什么？": {
+        "intent_family": "knowledge", "intent": "entity_info", "domain": "world", "topic": "creature",
+        "target_mission_id": None, "target_planet_id": None, "target_creature_id": None,
+        "target_effect_type": None, "requested_stat": None, "use_active_mission": False,
+        "use_current_context": True, "confidence": 0.8, "warnings": [],
+    },
+    # 点名了一个玩家从未发现过的生物（CR001 没有 discovery 记录）
+    "熔岩甲虫是什么？": {
+        "intent_family": "knowledge", "intent": "entity_info", "domain": "world", "topic": "creature",
+        "target_mission_id": None, "target_planet_id": None, "target_creature_id": "CR001",
+        "target_effect_type": None, "requested_stat": None, "use_active_mission": False,
+        "use_current_context": False, "confidence": 0.9, "warnings": [],
     },
     "今天天气怎么样？": {
         "intent_family": "unknown", "intent": "unknown", "domain": None, "topic": None,
@@ -274,6 +290,9 @@ def test_knowledge_path_matches_canvas_and_skips_game_data():
     assert ref_lore in result["user_prompt"]
     assert [e["stage"] for e in events] == ["intent", "knowledge", "lore", "answer"]
     assert result["debug"]["lore_queries"] == ["gene_gameplay_collection 生物样本采集 GS_GENE_COLLECTION"]
+    # 与玩家状态无关的知识问题，不附带 current_context
+    assert "current_context" not in result["user_prompt"]
+    assert "current_context" not in result["debug"]
 
 
 def test_unknown_path_direct_reply():
@@ -320,3 +339,122 @@ def test_http_ndjson_stream():
         assert lines[0] == {"type": "status", "stage": "intent", "text": "正在理解你的问题…"}
         assert lines[-1]["type"] == "result" and lines[-1]["mode"] == "llm"
         assert client.get("/health").json()["status"] == "ok"
+
+
+# ----------------------------------------------------------------------
+# 指代当前对象 / 发现程度过滤（steps/current_context.py）
+# ----------------------------------------------------------------------
+def test_intent_llm_receives_player_state_and_creatures():
+    _, _, rec = asyncio.run(run("这个动物是什么？"))
+    user_msg = rec.gateway_bodies[0]["messages"][-1]["content"]
+    assert '"current_planet_id": "PL001"' in user_msg
+    assert '"active_mission_id": "MS002"' in user_msg
+    assert "焰核巨兽" in user_msg and "CR003" in user_msg
+
+
+def test_this_creature_resolves_from_active_mission():
+    result, events, _ = asyncio.run(run("这个动物是什么？"))
+    assert result["mode"] == "llm"
+    assert [e["stage"] for e in events] == ["intent", "knowledge", "lore", "answer"]
+    cc = result["debug"]["current_context"]
+    # 玩家在 PL001，当前任务 MS002 的目标是 PL001 上的 CR003（已 scanned）
+    assert cc["reference_status"] == "resolved"
+    assert cc["current_planet"]["planet_name"] == "赤曜火山星"
+    assert cc["target_creature"] == {
+        "creature_id": "CR003", "resolved_from": "active_mission",
+        "discovery_state": "scanned", "details_allowed": True, "species_name": "焰核巨兽",
+    }
+    assert result["debug"]["intent_resolved"]["target_creature_id"] == "CR003"
+    assert any(q.startswith("creature_core_behemoth") for q in result["debug"]["lore_queries"])
+    # 主 LLM 能看到 current_context
+    ctx = result["debug"]["response_context"]
+    assert ctx["response_mode"] == "knowledge"
+    assert ctx["current_context"]["target_creature"]["creature_id"] == "CR003"
+    assert "[[LORE:creature_core_behemoth]]" in result["user_prompt"]
+
+
+def test_undiscovered_creature_lore_is_hidden():
+    result, _, rec = asyncio.run(run("熔岩甲虫是什么？"))
+    cc = result["debug"]["current_context"]
+    assert cc["target_creature"]["discovery_state"] == "unknown"
+    assert cc["target_creature"]["details_allowed"] is False
+    assert "species_name" not in cc["target_creature"]
+    assert result["debug"]["lore_queries"] == []
+    assert rec.ragflow_bodies == []
+    assert "creature_lore_hidden_by_discovery" in result["debug"]["knowledge_context"]["warnings"]
+
+
+def _resolve(player, creatures, intent_extra=None, missions=None, discoveries=None):
+    intent = {**INTENTS["这个动物是什么？"], **(intent_extra or {})}
+    _, cc = current_context.resolve_knowledge_context(
+        json.dumps(intent, ensure_ascii=False),
+        json.dumps(player), json.dumps(MISSIONS if missions is None else missions), json.dumps(PLANETS),
+        json.dumps(creatures, ensure_ascii=False),
+        json.dumps(DISCOVERIES if discoveries is None else discoveries), "P001",
+    )
+    return cc
+
+
+def test_resolve_by_current_planet_when_no_mission():
+    player = {"player_id": "P001", "current_planet_id": "PL001"}
+    creatures = [
+        {"creature_id": "CR002", "species_name": "赤甲龙蜥", "planet_id": "PL001"},
+        {"creature_id": "CR004", "species_name": "霜脊鳐", "planet_id": "PL002"},
+    ]
+    cc = _resolve(player, creatures, discoveries=[])
+    assert cc["target_creature"]["creature_id"] == "CR002"
+    assert cc["target_creature"]["resolved_from"] == "current_planet"
+
+
+def test_resolve_ambiguous_when_several_creatures_on_planet():
+    player = {"player_id": "P001", "current_planet_id": "PL001"}
+    creatures = [
+        {"creature_id": "CR002", "species_name": "赤甲龙蜥", "planet_id": "PL001"},
+        {"creature_id": "CR003", "species_name": "焰核巨兽", "planet_ids": ["PL001"]},
+    ]
+    cc = _resolve(player, creatures)
+    assert cc["target_creature"] is None
+    assert cc["reference_status"] == "ambiguous"
+    # CR002 analyzed、CR003 scanned 都可以给出名称，供主 LLM 反问
+    assert [c["species_name"] for c in cc["candidate_creatures"]] == ["赤甲龙蜥", "焰核巨兽"]
+
+
+def test_mission_on_other_planet_is_not_used():
+    # 玩家不在任务目标星球上，不能把任务目标生物当成“这个动物”
+    player = {"player_id": "P001", "current_planet_id": "PL002", "active_mission_id": "MS002"}
+    cc = _resolve(player, CREATURES)
+    assert cc["target_creature"] is None
+    assert cc["reference_status"] == "unresolved"
+
+
+def test_explicit_creature_from_history_wins():
+    player = {"player_id": "P001", "current_planet_id": "PL001", "active_mission_id": "MS002"}
+    cc = _resolve(player, CREATURES, {"target_creature_id": "CR002"})
+    assert cc["target_creature"]["creature_id"] == "CR002"
+    assert cc["target_creature"]["resolved_from"] == "intent"
+
+
+def test_route_intent_legacy_environment_preparation():
+    assert route_intent.main(json.dumps({"intent": "environment_preparation"})) == "decision"
+
+
+def test_real_mock_data_encountered_creature():
+    # 取自 Mock Server db.json：P001 在 PL001，当前任务 MS001 没有目标生物，
+    # PL001 有 3 种生物（home_planet_id），玩家只 encountered 过 CR001
+    player = {"player_id": "P001", "current_planet_id": "PL001", "active_mission_id": "MS001"}
+    missions = [{"mission_id": "MS001", "mission_name": "火山带调查",
+                 "target_planet_id": "PL001", "target_creature_id": None}]
+    creatures = [
+        {"creature_id": "CR001", "species_name": "熔岩甲虫", "home_planet_id": "PL001"},
+        {"creature_id": "CR002", "species_name": "赤甲龙蜥", "home_planet_id": "PL001"},
+        {"creature_id": "CR003", "species_name": "焰核巨兽", "home_planet_id": "PL001"},
+        {"creature_id": "CR004", "species_name": "冰脊鳐", "home_planet_id": "PL002"},
+    ]
+    discoveries = [{"player_id": "P001", "entity_type": "creature", "entity_id": "CR001",
+                    "discovery_state": "encountered"}]
+    cc = _resolve(player, creatures, missions=missions, discoveries=discoveries)
+    assert cc["reference_status"] == "resolved"
+    assert cc["target_creature"] == {
+        "resolved_from": "current_planet_discovery", "creature_id": "CR001",
+        "discovery_state": "encountered", "details_allowed": False,
+    }
